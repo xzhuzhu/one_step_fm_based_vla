@@ -22,11 +22,7 @@ The official LIBERO evaluation used 500 episodes for each suite at each checkpoi
 | LIBERO-10 | 475 / 500 | 95.0% |
 | **All four** | **1962 / 2000** | **98.10%** |
 
-The single-GPU, 32-shard BF16 re-evaluation completed 2,000 episodes with
-1,957 successes (97.85%): Spatial 97.4%, Object 100.0%, Goal 97.2%, and
-LIBERO-10 96.8%. Its protocol and per-task results are recorded in
-[95k_32slice_bf16.json](experiments/libero/results/95k_32slice_bf16.json).
-This re-evaluation is separate from the original result above.
+
 
 ## Checkpoint
 
