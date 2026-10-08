@@ -31,7 +31,7 @@ def shard_payload(checkpoint, shard):
 
 
 def make_shards(tmp_path):
-    checkpoint = tmp_path / "finalvla_95k.pth"
+    checkpoint = tmp_path / "one_step_fm_based_vla_95k.pth"
     checkpoint.write_bytes(b"checkpoint")
     paths = []
     for shard in range(SHARDS):
@@ -92,7 +92,7 @@ def test_completed_shards_resume_without_spawning_workers(tmp_path, monkeypatch)
 
 
 def test_all_thirty_two_workers_share_one_gpu(tmp_path, monkeypatch):
-    checkpoint = tmp_path / "finalvla_95k.pth"
+    checkpoint = tmp_path / "one_step_fm_based_vla_95k.pth"
     checkpoint.write_bytes(b"checkpoint")
     args = SimpleNamespace(
         output_dir=tmp_path, ckpt=checkpoint, gpu=2, save_video=False,
@@ -116,7 +116,7 @@ def test_all_thirty_two_workers_share_one_gpu(tmp_path, monkeypatch):
 
 
 def test_launch_failure_terminates_existing_workers(tmp_path, monkeypatch):
-    checkpoint = tmp_path / "finalvla_95k.pth"
+    checkpoint = tmp_path / "one_step_fm_based_vla_95k.pth"
     checkpoint.write_bytes(b"checkpoint")
     args = SimpleNamespace(
         output_dir=tmp_path, ckpt=checkpoint, gpu=2, save_video=False,

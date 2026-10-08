@@ -18,7 +18,7 @@ from .protocol import PROTOCOL, SHARDS, SUITES, TRIALS_PER_TASK
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--ckpt", type=Path, default=Path("finalvla_95k.pth"))
+    parser.add_argument("--ckpt", type=Path, default=Path("one_step_fm_based_vla_95k.pth"))
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/evaluation/95k_32slice"))
     parser.add_argument("--dinov3-path", type=Path, default=Path("pretrained/dinov3-vitb16"))

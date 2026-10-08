@@ -12,8 +12,8 @@ DATASET_DIRS="${DATASET_DIRS:?Set DATASET_DIRS to the four comma-separated LIBER
 DINOV3_PATH="${DINOV3_PATH:-$PROJECT_ROOT/pretrained/dinov3-vitb16}"
 BERT_PATH="${BERT_PATH:-$PROJECT_ROOT/pretrained/bert-base-uncased}"
 R3M_PATH="${R3M_PATH:-$PROJECT_ROOT/pretrained/r3m-resnet18/backbone.pth}"
-CHECKPOINT_DIR="${CHECKPOINT_DIR:-$PROJECT_ROOT/outputs/finalvla_from0_100k}"
-CHECKPOINT_PREFIX="${CHECKPOINT_PREFIX:-finalvla_step}"
+CHECKPOINT_DIR="${CHECKPOINT_DIR:-$PROJECT_ROOT/outputs/one_step_fm_based_vla_from0_100k}"
+CHECKPOINT_PREFIX="${CHECKPOINT_PREFIX:-one_step_fm_based_vla_step}"
 RESUME_MODE="${RESUME_MODE:-none}"
 R3M_FEATURE_CACHE_PATH="${R3M_FEATURE_CACHE_PATH:-}"
 

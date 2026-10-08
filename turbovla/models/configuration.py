@@ -228,7 +228,7 @@ class TurboVLAConfig:
         data = dict(payload)
         history_data = dict(data.get("history", {}))
         # Accept checkpoints from the original training run while exposing only
-        # parameters that affect the fixed FinalVLA architecture.
+        # parameters that affect the fixed one_step_fm_based_vla architecture.
         history_data = {k: v for k, v in history_data.items()
                         if k in {f.name for f in fields(HistoryConfig)}}
         action_data = {k: v for k, v in dict(data.get("action", {})).items()

@@ -1,4 +1,4 @@
-"""Canonical four-suite FinalVLA training entry point."""
+"""Canonical four-suite one_step_fm_based_vla training entry point."""
 
 from . import pi05, trainer
 

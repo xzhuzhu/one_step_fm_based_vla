@@ -1,4 +1,4 @@
-"""FinalVLA model definitions."""
+"""one_step_fm_based_vla model definitions."""
 
 from .configuration import TurboVLAConfig
 from .turbovla import TurboVLA, build_turbovla

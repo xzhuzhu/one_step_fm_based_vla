@@ -26,7 +26,7 @@ class _IdentityProjection(nn.Module):
         return values
 
 
-def test_finalvla_history_config_has_only_active_parameters() -> None:
+def test_one_step_fm_based_vla_history_config_has_only_active_parameters() -> None:
     config = TurboVLAConfig(
         r3m=R3MEncoderConfig(enabled=True, checkpoint_path="r3m.pth"),
         history=HistoryConfig(enabled=True, length=12, r3m_enabled=True),

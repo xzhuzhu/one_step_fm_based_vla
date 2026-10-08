@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Original FinalVLA AdamW recipe and checkpointed EMA shadows."""
+"""Original one_step_fm_based_vla AdamW recipe and checkpointed EMA shadows."""
 
 
 import torch.optim as torch_optim

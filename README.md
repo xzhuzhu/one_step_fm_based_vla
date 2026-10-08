@@ -1,6 +1,6 @@
-# FinalVLA
+# one_step_fm_based_vla
 
-FinalVLA is the V15 LIBERO vision-language-action model with  Mamba. This repository contains the training and evaluation code for the run evaluated from 85k through 99k steps. The best checkpoint is step 95,000.
+one_step_fm_based_vla is the V15 LIBERO vision-language-action model with  Mamba. This repository contains the training and evaluation code for the run evaluated from 85k through 99k steps. The best checkpoint is step 95,000.
 
 ## Model and training
 
@@ -26,11 +26,11 @@ The official LIBERO evaluation used 500 episodes for each suite at each checkpoi
 
 ## Checkpoint
 
-Download all 26 assets from the [v15-95k release](https://github.com/xzhuzhu/finalvla/releases/tag/v15-95k), then reconstruct and verify:
+Download all 26 assets from the [v15-95k release](https://github.com/xzhuzhu/one_step_fm_based_vla/releases/tag/v15-95k), then reconstruct and verify:
 
 ```bash
-cat finalvla_95k.pth.part-* > finalvla_95k.pth
-printf '%s  %s\n' '63383e42566ff5f3eef88ef5025b343797ef79d7a5325c3cb6e098e6b0df8710' 'finalvla_95k.pth' | sha256sum -c -
+cat one_step_fm_based_vla_95k.pth.part-* > one_step_fm_based_vla_95k.pth
+printf '%s  %s\n' '63383e42566ff5f3eef88ef5025b343797ef79d7a5325c3cb6e098e6b0df8710' 'one_step_fm_based_vla_95k.pth' | sha256sum -c -
 ```
 
 The full training checkpoint includes the model and optimizer state. It was checked against this source tree with zero missing or unexpected model keys. The 26 release assets are split because one checkpoint exceeds GitHub's per-asset size limit.
@@ -54,7 +54,7 @@ DATASET_DIRS='/path/to/libero_spatial,/path/to/libero_object,/path/to/libero_goa
   bash scripts/libero/train_100k.sh
 ```
 
-Check `finalvla-train --help` for available runtime arguments. Both `finalvla-train` and the training launcher use `turbovla.training.train_mixed`. The launcher fixes the architecture and optimizer recipe used for the published run. Set `--head_lr` and `--dinov3_lr` to change the two learning rates.
+Check `one_step_fm_based_vla-train --help` for available runtime arguments. Both `one_step_fm_based_vla-train` and the training launcher use `turbovla.training.train_mixed`. The launcher fixes the architecture and optimizer recipe used for the published run. Set `--head_lr` and `--dinov3_lr` to change the two learning rates.
 
 ## Evaluate
 
@@ -65,13 +65,13 @@ DINOv3 and R3M update at every policy query. Mamba runs on CUDA using the
 matched BF16 scan.
 
 ```bash
-finalvla-eval --ckpt finalvla_95k.pth --gpu 2 \
+one_step_fm_based_vla-eval --ckpt one_step_fm_based_vla_95k.pth --gpu 2 \
   --output-dir outputs/evaluation/95k_32slice_gpu2
 ```
 
 Each suite has 500 episodes; the full run has 2,000. The evaluator reads the
 model architecture from the checkpoint and uses local pretrained resources.
-Use `finalvla-eval --help` for path options and optional video output.
+Use `one_step_fm_based_vla-eval --help` for path options and optional video output.
 Completed shards are resumed after validating their protocol and coverage;
 changing weights, resources, code, package versions, or GPU requires a new output
 directory. EGL rendering uses the packaged NVIDIA vendor configuration.

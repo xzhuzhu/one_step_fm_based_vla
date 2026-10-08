@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "finalvla"
+name = "one_step_fm_based_vla"
 version = "0.2.0"
-description = "FinalVLA V15 matched CUDA training and LIBERO evaluation"
+description = "one_step_fm_based_vla V15 matched CUDA training and LIBERO evaluation"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
@@ -38,8 +38,8 @@ dev = [
 ]
 
 [project.scripts]
-finalvla-train = "turbovla.training.train_mixed:main"
-finalvla-eval = "turbovla.evaluation.runner:main"
+one_step_fm_based_vla-train = "turbovla.training.train_mixed:main"
+one_step_fm_based_vla-eval = "turbovla.evaluation.runner:main"
 
 [tool.setuptools.packages.find]
 where = [".", "third_party/vla_adapter"]

@@ -25,14 +25,14 @@ class DummyArgs:
 
 def parse_args():
     """Runtime settings for the fixed V15 matched-CUDA architecture."""
-    parser = argparse.ArgumentParser(description="Train FinalVLA on four LIBERO suites")
+    parser = argparse.ArgumentParser(description="Train one_step_fm_based_vla on four LIBERO suites")
     for name in ("dinov3_path", "bert_path", "r3m_path"):
         parser.add_argument(f"--{name}", required=True)
     for name in ("dataset_dirs", "stats_path", "stats_key"):
         parser.add_argument(f"--{name}", required=True)
     parser.add_argument("--r3m_feature_cache_path", default="")
-    parser.add_argument("--checkpoint_dir", default="outputs/finalvla")
-    parser.add_argument("--checkpoint_prefix", default="finalvla_step")
+    parser.add_argument("--checkpoint_dir", default="outputs/one_step_fm_based_vla")
+    parser.add_argument("--checkpoint_prefix", default="one_step_fm_based_vla_step")
     parser.add_argument("--resume_mode", choices=("none", "model", "all"), default="none")
     parser.add_argument("--init_checkpoint", default="")
     parser.add_argument("--batch_size", type=int, default=8)

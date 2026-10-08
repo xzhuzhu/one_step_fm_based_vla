@@ -335,7 +335,7 @@ class TurboVLAPolicy:
         self._checkpoint = torch.load(self.ckpt_path, map_location="cpu")
         model_config = self._checkpoint.get("model_config") if isinstance(self._checkpoint, dict) else None
         if model_config is None:
-            raise ValueError("FinalVLA evaluation requires a checkpoint containing model_config")
+            raise ValueError("one_step_fm_based_vla evaluation requires a checkpoint containing model_config")
         config = TurboVLAConfig.from_mapping(model_config)
         config.text.model_name_or_path = self.bert_path
         config.text.local_files_only = True

@@ -5,5 +5,5 @@ adapted for TurboVLA evaluation. It does not vendor the complete VLA-Adapter
 repository. The retained MIT license is in
 `third_party/licenses/VLA-Adapter.txt`.
 
-`vla_adapter.rollout` is the internal episode worker for `finalvla-eval`.
+`vla_adapter.rollout` is the internal episode worker for `one_step_fm_based_vla-eval`.
 Its protocol is fixed by `turbovla.evaluation.protocol`.

@@ -1,4 +1,4 @@
-"""The verified FinalVLA single-GPU evaluation protocol."""
+"""The verified one_step_fm_based_vla single-GPU evaluation protocol."""
 
 SUITES = ("libero_spatial", "libero_object", "libero_goal", "libero_10")
 SHARDS = 32
