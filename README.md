@@ -1,11 +1,11 @@
 # FinalVLA
 
-FinalVLA is the V15 LIBERO vision-language-action model with matched CUDA Mamba. This repository contains the training and evaluation code for the run evaluated from 85k through 99k steps. The best checkpoint is step 95,000.
+FinalVLA is the V15 LIBERO vision-language-action model with  Mamba. This repository contains the training and evaluation code for the run evaluated from 85k through 99k steps. The best checkpoint is step 95,000.
 
 ## Model and training
 
 - Two DINOv3 camera views, BERT language features, R3M features, and robot state feed the policy.
-- A 12-step history encoder uses matched CUDA Mamba. R3M belief and tacit features condition the flow-matching action head.
+- A 12-step history encoder uses  Mamba. R3M belief and tacit features condition the flow-matching action head.
 - Robot state is zero-padded into the action-head condition. The action chunk length is 12; the evaluated rollout executes 10 actions before replanning.
 - The training objective is action flow matching. There is no KL constraint or auxiliary future-state prediction.
 - The published run trained from scratch for 100,000 optimizer steps using four GPUs.
