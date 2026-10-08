@@ -1,9 +1,7 @@
 from collections import deque
-from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
 import torch
 from torch import nn
 
@@ -36,7 +34,7 @@ def test_finalvla_history_config_has_only_active_parameters() -> None:
     assert config.history.r3m_predictive_belief
     assert config.history.r3m_controlled_causal_belief
     assert config.history.r3m_tacit_belief_fusion
-    assert not config.history.visual_enabled
+    assert not hasattr(config.history, "visual_enabled")
     assert "r3m_belief_future_horizons" not in config.to_dict()["history"]
     assert "r3m_intentional_memory" not in config.to_dict()["history"]
 
@@ -136,7 +134,6 @@ def test_policy_records_synchronized_r3m_history() -> None:
 
     policy = TurboVLAPolicy.__new__(TurboVLAPolicy)
     policy.history_length = 12
-    policy.history_visual_dinov3 = False
     policy.history_r3m = True
     policy._state_history = deque(maxlen=12)
     policy._image_history = deque(maxlen=12)

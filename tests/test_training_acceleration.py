@@ -143,14 +143,13 @@ def test_checkpoint_evaluation_accepts_legacy_scan_metadata(monkeypatch, tmp_pat
             self.history_encoder = HistoryEncoder(history_length=12)
 
     monkeypatch.setattr(turbovla_module, "TurboVLA", Capture)
-    monkeypatch.setattr(policy_module, "load_turbovla_builder", lambda: (lambda *_: None, "test"))
     monkeypatch.setattr(policy_module.TurboVLAPolicy, "_load_checkpoint", lambda self: None)
     monkeypatch.setattr(policy_module.TurboVLAPolicy, "_set_eval_precision", lambda self: None)
     monkeypatch.setattr(policy_module.TurboVLAPolicy, "_verify_model_precision", lambda self: None)
     monkeypatch.setattr(policy_module, "build_dinov3_manual_processor", lambda *_: object())
     policy = policy_module.TurboVLAPolicy(
         str(checkpoint), dinov3_path="pretrained/dinov3-vitb16",
-        bert_path="pretrained/bert-base-uncased", device="cpu", precision="fp32", verbose=False,
+        bert_path="pretrained/bert-base-uncased", device="cpu", verbose=False,
     )
     assert not hasattr(captured["history"], "cuda_scan")
     assert isinstance(policy.model.history_encoder, HistoryEncoder)

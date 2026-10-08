@@ -1,0 +1,549 @@
+{
+  "description": "Single-GPU 32-shard re-evaluation; separate from the originally reported 98.10% result",
+  "checkpoint_step": 95000,
+  "checkpoint_sha256": "63383e42566ff5f3eef88ef5025b343797ef79d7a5325c3cb6e098e6b0df8710",
+  "evaluated_source_base_commit": "5284c8d8aa73b7fdd2487f0a6e596c948d5bc15e",
+  "evaluated_source_diff_sha256": "705f06a46d1882cd93f37190c8dc57fc75acc9a1e4bbcb93338dfaa51b9ec4f5",
+  "protocol": {
+    "gpu": 2,
+    "slices_per_suite": 32,
+    "episodes_per_suite": 500,
+    "num_trials_per_task": 50,
+    "seed": 42,
+    "precision": "bf16",
+    "chunk_size": 12,
+    "num_open_loop_steps": 10,
+    "dinov3_update_interval": 1,
+    "r3m_update_interval": 1
+  },
+  "suite_execution": "sequential",
+  "suites": {
+    "libero_spatial": {
+      "tasks": [
+        {
+          "task_id": 0,
+          "task_description": "pick up the black bowl between the plate and the ramekin and place it on the plate",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 396,
+          "execution_horizon_counts": {
+            "10": 396
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 1,
+          "task_description": "pick up the black bowl next to the ramekin and place it on the plate",
+          "episodes": 50,
+          "successes": 48,
+          "policy_queries": 590,
+          "execution_horizon_counts": {
+            "10": 590
+          },
+          "success_rate": 0.96,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 2,
+          "task_description": "pick up the black bowl from table center and place it on the plate",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 482,
+          "execution_horizon_counts": {
+            "10": 482
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 3,
+          "task_description": "pick up the black bowl on the cookie box and place it on the plate",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 423,
+          "execution_horizon_counts": {
+            "10": 423
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 4,
+          "task_description": "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate",
+          "episodes": 50,
+          "successes": 48,
+          "policy_queries": 676,
+          "execution_horizon_counts": {
+            "10": 676
+          },
+          "success_rate": 0.96,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 5,
+          "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+          "episodes": 50,
+          "successes": 47,
+          "policy_queries": 508,
+          "execution_horizon_counts": {
+            "10": 508
+          },
+          "success_rate": 0.94,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 6,
+          "task_description": "pick up the black bowl next to the cookie box and place it on the plate",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 528,
+          "execution_horizon_counts": {
+            "10": 528
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 7,
+          "task_description": "pick up the black bowl on the stove and place it on the plate",
+          "episodes": 50,
+          "successes": 49,
+          "policy_queries": 601,
+          "execution_horizon_counts": {
+            "10": 601
+          },
+          "success_rate": 0.98,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 8,
+          "task_description": "pick up the black bowl next to the plate and place it on the plate",
+          "episodes": 50,
+          "successes": 46,
+          "policy_queries": 561,
+          "execution_horizon_counts": {
+            "10": 561
+          },
+          "success_rate": 0.92,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 9,
+          "task_description": "pick up the black bowl on the wooden cabinet and place it on the plate",
+          "episodes": 50,
+          "successes": 49,
+          "policy_queries": 610,
+          "execution_horizon_counts": {
+            "10": 610
+          },
+          "success_rate": 0.98,
+          "mean_execution_horizon": 10.0
+        }
+      ],
+      "total_episodes": 500,
+      "total_successes": 487,
+      "overall_success_rate": 0.974,
+      "policy_queries": 5375,
+      "execution_horizon_counts": {
+        "10": 5375
+      }
+    },
+    "libero_object": {
+      "tasks": [
+        {
+          "task_id": 0,
+          "task_description": "pick up the alphabet soup and place it in the basket",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 691,
+          "execution_horizon_counts": {
+            "10": 691
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 1,
+          "task_description": "pick up the cream cheese and place it in the basket",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 631,
+          "execution_horizon_counts": {
+            "10": 631
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 2,
+          "task_description": "pick up the salad dressing and place it in the basket",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 588,
+          "execution_horizon_counts": {
+            "10": 588
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 3,
+          "task_description": "pick up the bbq sauce and place it in the basket",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 665,
+          "execution_horizon_counts": {
+            "10": 665
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 4,
+          "task_description": "pick up the ketchup and place it in the basket",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 712,
+          "execution_horizon_counts": {
+            "10": 712
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 5,
+          "task_description": "pick up the tomato sauce and place it in the basket",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 636,
+          "execution_horizon_counts": {
+            "10": 636
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 6,
+          "task_description": "pick up the butter and place it in the basket",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 736,
+          "execution_horizon_counts": {
+            "10": 736
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 7,
+          "task_description": "pick up the milk and place it in the basket",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 638,
+          "execution_horizon_counts": {
+            "10": 638
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 8,
+          "task_description": "pick up the chocolate pudding and place it in the basket",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 735,
+          "execution_horizon_counts": {
+            "10": 735
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 9,
+          "task_description": "pick up the orange juice and place it in the basket",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 591,
+          "execution_horizon_counts": {
+            "10": 591
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        }
+      ],
+      "total_episodes": 500,
+      "total_successes": 500,
+      "overall_success_rate": 1.0,
+      "policy_queries": 6623,
+      "execution_horizon_counts": {
+        "10": 6623
+      }
+    },
+    "libero_goal": {
+      "tasks": [
+        {
+          "task_id": 0,
+          "task_description": "open the middle drawer of the cabinet",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 613,
+          "execution_horizon_counts": {
+            "10": 613
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 1,
+          "task_description": "put the bowl on the stove",
+          "episodes": 50,
+          "successes": 49,
+          "policy_queries": 471,
+          "execution_horizon_counts": {
+            "10": 471
+          },
+          "success_rate": 0.98,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 2,
+          "task_description": "put the wine bottle on top of the cabinet",
+          "episodes": 50,
+          "successes": 48,
+          "policy_queries": 508,
+          "execution_horizon_counts": {
+            "10": 508
+          },
+          "success_rate": 0.96,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 3,
+          "task_description": "open the top drawer and put the bowl inside",
+          "episodes": 50,
+          "successes": 46,
+          "policy_queries": 983,
+          "execution_horizon_counts": {
+            "10": 983
+          },
+          "success_rate": 0.92,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 4,
+          "task_description": "put the bowl on top of the cabinet",
+          "episodes": 50,
+          "successes": 48,
+          "policy_queries": 493,
+          "execution_horizon_counts": {
+            "10": 493
+          },
+          "success_rate": 0.96,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 5,
+          "task_description": "push the plate to the front of the stove",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 632,
+          "execution_horizon_counts": {
+            "10": 632
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 6,
+          "task_description": "put the cream cheese in the bowl",
+          "episodes": 50,
+          "successes": 49,
+          "policy_queries": 485,
+          "execution_horizon_counts": {
+            "10": 485
+          },
+          "success_rate": 0.98,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 7,
+          "task_description": "turn on the stove",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 392,
+          "execution_horizon_counts": {
+            "10": 392
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 8,
+          "task_description": "put the bowl on the plate",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 436,
+          "execution_horizon_counts": {
+            "10": 436
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 9,
+          "task_description": "put the wine bottle on the rack",
+          "episodes": 50,
+          "successes": 46,
+          "policy_queries": 801,
+          "execution_horizon_counts": {
+            "10": 801
+          },
+          "success_rate": 0.92,
+          "mean_execution_horizon": 10.0
+        }
+      ],
+      "total_episodes": 500,
+      "total_successes": 486,
+      "overall_success_rate": 0.972,
+      "policy_queries": 5814,
+      "execution_horizon_counts": {
+        "10": 5814
+      }
+    },
+    "libero_10": {
+      "tasks": [
+        {
+          "task_id": 0,
+          "task_description": "put both the alphabet soup and the tomato sauce in the basket",
+          "episodes": 50,
+          "successes": 48,
+          "policy_queries": 1419,
+          "execution_horizon_counts": {
+            "10": 1419
+          },
+          "success_rate": 0.96,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 1,
+          "task_description": "put both the cream cheese box and the butter in the basket",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 1251,
+          "execution_horizon_counts": {
+            "10": 1251
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 2,
+          "task_description": "turn on the stove and put the moka pot on it",
+          "episodes": 50,
+          "successes": 50,
+          "policy_queries": 1243,
+          "execution_horizon_counts": {
+            "10": 1243
+          },
+          "success_rate": 1.0,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 3,
+          "task_description": "put the black bowl in the bottom drawer of the cabinet and close it",
+          "episodes": 50,
+          "successes": 47,
+          "policy_queries": 1216,
+          "execution_horizon_counts": {
+            "10": 1216
+          },
+          "success_rate": 0.94,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 4,
+          "task_description": "put the white mug on the left plate and put the yellow and white mug on the right plate",
+          "episodes": 50,
+          "successes": 49,
+          "policy_queries": 1177,
+          "execution_horizon_counts": {
+            "10": 1177
+          },
+          "success_rate": 0.98,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 5,
+          "task_description": "pick up the book and place it in the back compartment of the caddy",
+          "episodes": 50,
+          "successes": 49,
+          "policy_queries": 951,
+          "execution_horizon_counts": {
+            "10": 951
+          },
+          "success_rate": 0.98,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 6,
+          "task_description": "put the white mug on the plate and put the chocolate pudding to the right of the plate",
+          "episodes": 50,
+          "successes": 47,
+          "policy_queries": 1265,
+          "execution_horizon_counts": {
+            "10": 1265
+          },
+          "success_rate": 0.94,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 7,
+          "task_description": "put both the alphabet soup and the cream cheese box in the basket",
+          "episodes": 50,
+          "successes": 49,
+          "policy_queries": 1294,
+          "execution_horizon_counts": {
+            "10": 1294
+          },
+          "success_rate": 0.98,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 8,
+          "task_description": "put both moka pots on the stove",
+          "episodes": 50,
+          "successes": 47,
+          "policy_queries": 2019,
+          "execution_horizon_counts": {
+            "10": 2019
+          },
+          "success_rate": 0.94,
+          "mean_execution_horizon": 10.0
+        },
+        {
+          "task_id": 9,
+          "task_description": "put the yellow and white mug in the microwave and close it",
+          "episodes": 50,
+          "successes": 48,
+          "policy_queries": 1430,
+          "execution_horizon_counts": {
+            "10": 1430
+          },
+          "success_rate": 0.96,
+          "mean_execution_horizon": 10.0
+        }
+      ],
+      "total_episodes": 500,
+      "total_successes": 484,
+      "overall_success_rate": 0.968,
+      "policy_queries": 13265,
+      "execution_horizon_counts": {
+        "10": 13265
+      }
+    }
+  },
+  "total_episodes": 2000,
+  "total_successes": 1957,
+  "overall_success_rate": 0.9785
+}

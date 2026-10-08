@@ -28,11 +28,6 @@ class _FirstHalf(nn.Module):
         return values[..., : values.shape[-1] // 2]
 
 
-class _LastStateGate(nn.Module):
-    def forward(self, values: torch.Tensor) -> torch.Tensor:
-        return values[..., -1:]
-
-
 class _CaptureAttention(nn.Module):
     def forward(self, query, key, value, **kwargs):
         self.key = key.detach().clone()
@@ -51,13 +46,7 @@ def test_rope_preserves_norm_and_distinguishes_past_positions() -> None:
     assert not torch.allclose(encoded[:, 1], encoded[:, 2])
 
 
-def _memory_model(
-    *,
-    dynamic_gate: bool = False,
-    residual_gate: bool = False,
-    token_dropout: float = 0.0,
-    rope_values: bool = True,
-) -> TurboVLA:
+def _memory_model() -> TurboVLA:
     model = TurboVLA.__new__(TurboVLA)
     nn.Module.__init__(model)
     model.config = SimpleNamespace(
@@ -66,10 +55,6 @@ def _memory_model(
             length=12,
             r3m_memory_num_queries=2,
             r3m_rope_base=10000.0,
-            r3m_memory_dynamic_gate=dynamic_gate,
-            r3m_memory_residual_gate=residual_gate,
-            r3m_memory_token_dropout=token_dropout,
-            r3m_memory_rope_values=rope_values,
         ),
         r3m=SimpleNamespace(num_views=2, image_size=2),
         interaction=SimpleNamespace(hidden_dim=4),
@@ -83,17 +68,9 @@ def _memory_model(
     model.r3m_history_memory_type_embedding = nn.Parameter(
         torch.tensor([[[[0.0] * 4, [1.0] * 4]]])
     )
-    if dynamic_gate:
-        model.r3m_history_memory_dynamic_gate = _LastStateGate()
-        model.r3m_history_memory_residual_scale = None
-    elif residual_gate:
-        model.r3m_history_memory_dynamic_gate = _LastStateGate()
-        model.r3m_history_memory_gate_logit = nn.Parameter(torch.tensor(0.0))
-        model.r3m_history_memory_residual_scale = nn.Parameter(torch.tensor(0.0))
-    else:
-        model.r3m_history_memory_gate_logit = nn.Parameter(torch.tensor(0.0))
-        model.r3m_history_memory_dynamic_gate = None
-        model.r3m_history_memory_residual_scale = None
+    model.r3m_history_memory_gate_logit = nn.Parameter(torch.tensor(0.0))
+    model.r3m_history_memory_dynamic_gate = None
+    model.r3m_history_memory_residual_scale = None
     model.r3m_history_cross_attention = nn.MultiheadAttention(
         4, 1, dropout=0.0, batch_first=True
     )
@@ -136,7 +113,7 @@ def test_r3m_history_builds_four_current_conditioned_view_separated_memories() -
 
 
 def test_key_only_rope_preserves_raw_history_values() -> None:
-    model = _memory_model(rope_values=False)
+    model = _memory_model()
     capture = _CaptureAttention()
     model.r3m_history_cross_attention = capture
     pixels = torch.zeros(1, 12, 2, 3, 2, 2)
@@ -156,70 +133,6 @@ def test_key_only_rope_preserves_raw_history_values() -> None:
     assert torch.all(capture.value[1, -1] == 20.0)
 
 
-def test_intentional_goal_operator_changes_how_current_queries_history() -> None:
-    model = _memory_model()
-    model.config.history.r3m_intentional_memory = True
-    model.r3m_history_intentional_goal_factors = nn.Sequential(nn.Linear(4, 4), nn.Tanh())
-    model.r3m_history_intentional_current_factors = nn.Linear(4, 4, bias=False)
-    model.r3m_history_intentional_relation_out = nn.Linear(4, 4, bias=False)
-    with torch.no_grad():
-        model.r3m_history_intentional_goal_factors[0].weight.copy_(torch.eye(4))
-        model.r3m_history_intentional_goal_factors[0].bias.zero_()
-        model.r3m_history_intentional_current_factors.weight.copy_(torch.eye(4))
-        model.r3m_history_intentional_relation_out.weight.copy_(torch.eye(4))
-
-    pixels = torch.zeros(1, 12, 2, 3, 2, 2)
-    pixels[:, -2] = 1.0
-    pixels[:, -1, 0] = 4.0
-    pixels[:, -1, 1] = 7.0
-    current = torch.tensor([[[2.0] * 4, [3.0] * 4]])
-    mask = torch.tensor([[False] * 10 + [True, True]])
-
-    positive, positive_mask = model.encode_r3m_history(
-        {"r3m_history": pixels},
-        current,
-        mask,
-        goal_summary=torch.ones(1, 4),
-    )
-    negative, negative_mask = model.encode_r3m_history(
-        {"r3m_history": pixels},
-        current,
-        mask,
-        goal_summary=-torch.ones(1, 4),
-    )
-
-    assert torch.equal(positive_mask, negative_mask)
-    assert not torch.allclose(positive, negative)
-
-
-def test_intentional_memory_uses_four_tokens_without_auxiliary_losses() -> None:
-    model = _memory_model()
-    model.config.history.r3m_intentional_memory = True
-    model.config.history.r3m_belief_future_horizons = (1, 4, 8, 12)
-    model.config.history.state_dim = 8
-    model.config.r3m.output_dim = 4
-    model.r3m_history_intentional_goal_factors = nn.Sequential(nn.Linear(4, 4), nn.Tanh())
-    model.r3m_history_intentional_current_factors = nn.Linear(4, 4, bias=False)
-    model.r3m_history_intentional_relation_out = nn.Linear(4, 4, bias=False)
-
-    samples = {
-        "r3m_history": torch.ones(2, 12, 2, 3, 2, 2),
-    }
-    tokens, token_mask, losses = model.encode_r3m_intentional_memory(
-        samples,
-        current_r3m_tokens=torch.ones(2, 2, 4),
-        history_mask=torch.ones(2, 12, dtype=torch.bool),
-        history_state_tokens=torch.zeros(2, 12, 4),
-        goal_summary=torch.ones(2, 4),
-    )
-
-    assert tokens.shape == (2, 4, 4)
-    assert torch.equal(token_mask, torch.ones(2, 4, dtype=torch.bool))
-    assert losses == {}
-    tokens.mean().backward()
-    assert model.r3m_history_intentional_relation_out.weight.grad is not None
-
-
 def test_r3m_history_all_padding_returns_zero_memories_without_nans() -> None:
     model = _memory_model()
     pixels = torch.zeros(1, 12, 2, 3, 2, 2)
@@ -235,86 +148,9 @@ def test_r3m_history_all_padding_returns_zero_memories_without_nans() -> None:
     assert torch.equal(tokens, torch.zeros_like(tokens))
 
 
-def test_dynamic_gate_uses_state_history_per_view_and_query() -> None:
-    model = _memory_model(dynamic_gate=True)
-    model.eval()
-    pixels = torch.zeros(1, 12, 2, 3, 2, 2)
-    pixels[:, -1] = 3.0
-    current = torch.tensor([[[6.0] * 4, [12.0] * 4]])
-    mask = torch.tensor([[False] * 11 + [True]])
-
-    low_gate, low_mask = model.encode_r3m_history(
-        {"r3m_history": pixels}, current, mask, torch.zeros(1, 12, 4)
-    )
-    high_gate, high_mask = model.encode_r3m_history(
-        {"r3m_history": pixels}, current, mask, torch.full((1, 12, 4), 2.0)
-    )
-
-    assert torch.equal(low_mask, high_mask)
-    assert low_gate.shape == (1, 4, 4)
-    assert not torch.allclose(low_gate, high_gate)
-    assert high_gate.norm() > low_gate.norm()
-
-
-def test_residual_gate_starts_at_scalar_gate_then_learns_state_correction() -> None:
-    model = _memory_model(residual_gate=True)
-    model.eval()
-    pixels = torch.zeros(1, 12, 2, 3, 2, 2)
-    pixels[:, -1] = 3.0
-    current = torch.tensor([[[6.0] * 4, [12.0] * 4]])
-    mask = torch.tensor([[False] * 11 + [True]])
-
-    low_state = torch.zeros(1, 12, 4)
-    high_state = torch.full((1, 12, 4), 2.0)
-    baseline_low, _ = model.encode_r3m_history(
-        {"r3m_history": pixels}, current, mask, low_state
-    )
-    baseline_high, _ = model.encode_r3m_history(
-        {"r3m_history": pixels}, current, mask, high_state
-    )
-    assert torch.allclose(baseline_low, baseline_high)
-
-    with torch.no_grad():
-        model.r3m_history_memory_residual_scale.fill_(1.0)
-    adapted_low, _ = model.encode_r3m_history(
-        {"r3m_history": pixels}, current, mask, low_state
-    )
-    adapted_high, _ = model.encode_r3m_history(
-        {"r3m_history": pixels}, current, mask, high_state
-    )
-    assert not torch.allclose(adapted_low, adapted_high)
-    assert adapted_high.norm() > adapted_low.norm()
-
-
-def test_history_token_dropout_masks_complete_tokens_only_during_training(monkeypatch) -> None:
-    model = _memory_model(token_dropout=0.15)
-    pixels = torch.zeros(1, 12, 2, 3, 2, 2)
-    pixels[:, -1] = 3.0
-    current = torch.tensor([[[6.0] * 4, [12.0] * 4]])
-    mask = torch.tensor([[False] * 11 + [True]])
-
-    model.eval()
-    _, eval_mask = model.encode_r3m_history({"r3m_history": pixels}, current, mask)
-    assert torch.equal(eval_mask, torch.ones(1, 4, dtype=torch.bool))
-
-    monkeypatch.setattr(
-        torch,
-        "rand",
-        lambda shape, **kwargs: torch.zeros(shape, device=kwargs.get("device")),
-    )
-    model.train()
-    train_tokens, train_mask = model.encode_r3m_history(
-        {"r3m_history": pixels}, current, mask
-    )
-
-    assert not train_mask.any()
-    assert torch.equal(train_tokens, torch.zeros_like(train_tokens))
-
-
 def test_dataset_right_aligns_prior_r3m_frames_without_current_leakage() -> None:
     dataset = LiberoRLDSDataset.__new__(LiberoRLDSDataset)
     dataset.history_length = 12
-    dataset.history_visual_dinov3 = False
     dataset.history_r3m = True
     dataset.chunk_size = 12
     dataset.expected_image_size = 256
@@ -360,7 +196,6 @@ def test_dataset_right_aligns_prior_r3m_frames_without_current_leakage() -> None
 def test_dataset_builds_history_without_predictive_targets() -> None:
     dataset = LiberoRLDSDataset.__new__(LiberoRLDSDataset)
     dataset.history_length = 12
-    dataset.history_visual_dinov3 = False
     dataset.history_r3m = True
     dataset.chunk_size = 12
     dataset.expected_image_size = 256
@@ -575,42 +410,3 @@ def test_forward_appends_r3m_history_before_state_history() -> None:
     assert result["condition"].shape == (1, 21, 4)
     assert result["condition_padding_mask"].shape == (1, 21)
     assert torch.all(result["condition"][:, 3:7] == 1)
-
-
-def test_forward_ablation_removes_only_four_r3m_history_tokens() -> None:
-    model = TurboVLA.__new__(TurboVLA)
-    nn.Module.__init__(model)
-    model.action_head_type = "flow_matching"
-    model.config = SimpleNamespace(
-        history=SimpleNamespace(r3m_enabled=True, visual_enabled=False),
-    )
-    model.history_encoder = _HistoryEncoder()
-    model.state_proj_module = _StateProjection()
-    model.flow_action_policy = _CaptureFlow()
-
-    def encode_condition(self, instructions, samples):
-        return (
-            torch.zeros(1, 3, 4),
-            torch.tensor([[False]]),
-            torch.zeros(1, 2, 4),
-        )
-
-    def fail_if_encoded(self, samples, current, mask):
-        raise AssertionError("ablated R3M history must not be encoded")
-
-    model._encode_condition_with_mask = MethodType(encode_condition, model)
-    model.encode_r3m_history = MethodType(fail_if_encoded, model)
-    history_mask = torch.ones(1, 12, dtype=torch.bool)
-
-    result = model(
-        ["instruction"],
-        {},
-        torch.zeros(1, 8),
-        history_states=torch.zeros(1, 12, 8),
-        history_mask=history_mask,
-        ablate_history_r3m_tokens=True,
-    )
-
-    # 3 current vision/text + 12 state-history + 2 current-state tokens.
-    assert result["condition"].shape == (1, 17, 4)
-    assert result["condition_padding_mask"].shape == (1, 17)

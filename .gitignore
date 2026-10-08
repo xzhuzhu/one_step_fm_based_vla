@@ -21,7 +21,7 @@ eval_result/
 results/
 !experiments/libero/results/
 !experiments/libero/results/85k_99k_all4.json
-!experiments/libero/results/libero_pro_object_mug_first_result.json
+!experiments/libero/results/95k_32slice_bf16.json
 tmp/
 .eval_watch_state*/
 *.pt

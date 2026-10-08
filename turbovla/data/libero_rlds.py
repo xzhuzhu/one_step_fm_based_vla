@@ -29,10 +29,8 @@ class LiberoRLDSDataset(IterableDataset):
         seed=42,
         local_files_only=True,
         expected_image_size=256,
-        backbone="dinov3",
         use_r3m=False,
         history_length=0,
-        history_visual_dinov3=False,
         history_r3m=False,
         r3m_feature_cache_path="",
         r3m_checkpoint_path="",
@@ -40,20 +38,13 @@ class LiberoRLDSDataset(IterableDataset):
         r3m_cache_precision="bf16_autocast",
     ):
         self.dataset_dir = dataset_dir
-        self.backbone = str(backbone)
         self.use_r3m = bool(use_r3m)
-        if self.backbone not in ("dinov3", "qwen3vl"):
-            raise ValueError(f"unsupported backbone={self.backbone!r}; expected 'dinov3' or 'qwen3vl'")
-        if self.use_r3m and self.backbone != "dinov3":
-            raise ValueError("R3M current-image processing requires backbone='dinov3'")
 
-        self.dino_processor = None
-        if self.backbone == "dinov3":
-            self.dino_processor = AutoImageProcessor.from_pretrained(
-                LOCAL_DINOV3_PATH,
-                local_files_only=bool(local_files_only),
-            )
-            self._disable_spatial_resize(self.dino_processor)
+        self.dino_processor = AutoImageProcessor.from_pretrained(
+            LOCAL_DINOV3_PATH,
+            local_files_only=bool(local_files_only),
+        )
+        self._disable_spatial_resize(self.dino_processor)
 
         self.chunk_size = int(chunk_size)
         self.rank = int(rank)
@@ -65,7 +56,6 @@ class LiberoRLDSDataset(IterableDataset):
         self.seed = int(seed)
         self.expected_image_size = int(expected_image_size)
         self.history_length = int(history_length)
-        self.history_visual_dinov3 = bool(history_visual_dinov3)
         self.history_r3m = bool(history_r3m)
         self.r3m_feature_cache_path = str(r3m_feature_cache_path or "")
         self.r3m_checkpoint_path = str(r3m_checkpoint_path or "")
@@ -85,12 +75,6 @@ class LiberoRLDSDataset(IterableDataset):
             )
         if self.history_length < 0:
             raise ValueError("history_length must be non-negative")
-        if self.history_visual_dinov3 and (
-            self.backbone != "dinov3" or self.history_length == 0
-        ):
-            raise ValueError(
-                "DINOv3 visual history requires backbone='dinov3' and history_length>0"
-            )
         if self.history_r3m and (not self.use_r3m or self.history_length != 12):
             raise ValueError("R3M history requires use_r3m=True and history_length=12")
 
@@ -189,8 +173,6 @@ class LiberoRLDSDataset(IterableDataset):
         self._ensure_expected_size(img_np)
         img = Image.fromarray(img_np)
 
-        if self.backbone == "qwen3vl":
-            return {"qwen3vl": img}
 
         dino_pixel_values = self.dino_processor(images=img, return_tensors="pt")["pixel_values"].squeeze(0)
         self._ensure_processor_preserved_resolution(dino_pixel_values, img_np, "DINOv3")
@@ -210,16 +192,8 @@ class LiberoRLDSDataset(IterableDataset):
         return torch.from_numpy(crop).permute(2, 0, 1)
 
     def _build_episode_image_cache(self, steps):
-        if not (self.history_visual_dinov3 or (self.history_r3m and self.r3m_feature_cache is None)):
+        if not (self.history_r3m and self.r3m_feature_cache is None):
             return None
-        if self.history_visual_dinov3:
-            return [
-                (
-                    self._process_image_pair(step["observation"]["image"]),
-                    self._process_image_pair(step["observation"]["wrist_image"]),
-                )
-                for step in steps
-            ]
         return [
             (
                 {"r3m": self._process_r3m_image(step["observation"]["image"])},
@@ -238,11 +212,8 @@ class LiberoRLDSDataset(IterableDataset):
 
     def _build_step_sample(self, steps, t, episode_len, image_cache=None, r3m_features=None):
         current_step = steps[t]
-        if image_cache is None or not self.history_visual_dinov3:
-            img1 = self._process_image_pair(current_step["observation"]["image"])
-            img2 = self._process_image_pair(current_step["observation"]["wrist_image"])
-        else:
-            img1, img2 = image_cache[t]
+        img1 = self._process_image_pair(current_step["observation"]["image"])
+        img2 = self._process_image_pair(current_step["observation"]["wrist_image"])
         if r3m_features is not None:
             img1, img2 = dict(img1), dict(img2)
             img1["r3m_features"] = r3m_features[t, 0]
@@ -287,35 +258,11 @@ class LiberoRLDSDataset(IterableDataset):
             history_states,
             history_mask,
         )
-        if not (self.history_visual_dinov3 or self.history_r3m):
+        if not self.history_r3m:
             return base
         if image_cache is None:
             image_cache = self._build_episode_image_cache(steps)
         history_visuals = {}
-        if self.history_visual_dinov3:
-            history_dinov3 = torch.zeros(
-                self.history_length,
-                2,
-                3,
-                self.expected_image_size,
-                self.expected_image_size,
-                dtype=torch.float32,
-            )
-            if count:
-                history_dinov3[-count:] = torch.stack(
-                    [
-                        torch.stack(
-                            [
-                                image_cache[index][0]["dinov3"],
-                                image_cache[index][1]["dinov3"],
-                            ],
-                            dim=0,
-                        )
-                        for index in range(first, t)
-                    ],
-                    dim=0,
-                )
-            history_visuals["dinov3_history"] = history_dinov3
         if self.history_r3m:
             if r3m_features is None:
                 history_r3m = torch.zeros(
@@ -457,7 +404,7 @@ def vla_collate_fn(batch):
             if isinstance(item_history, dict):
                 history_mapping = item_history
             else:
-                history_mapping = {"dinov3_history": item_history}
+                raise TypeError("history visuals must be a mapping of R3M history tensors")
             if not history_visuals:
                 history_visuals = {key: [] for key in history_mapping}
             if set(history_mapping) != set(history_visuals):
@@ -489,74 +436,3 @@ def vla_collate_fn(batch):
     if with_history:
         return base + (torch.stack(history_states), torch.stack(history_masks))
     return base
-
-
-class Qwen3VLCollator:
-    """Batch collator that runs the Qwen3-VL processor on images + instructions."""
-
-    def __init__(self, processor):
-        self.processor = processor
-        image_processor = getattr(processor, "image_processor", None)
-        if image_processor is not None and hasattr(image_processor, "min_pixels"):
-            image_processor.min_pixels = 256 * 256
-            image_processor.max_pixels = 256 * 256
-
-    def __call__(self, batch):
-        if len(batch) == 0:
-            raise ValueError("empty batch cannot be collated")
-
-        image_pairs = []
-        instructions = []
-        action_chunks = []
-        action_chunk_masks = []
-        states = []
-
-        for images, instruction, state, action_chunk, action_chunk_mask in batch:
-            if not isinstance(images, (list, tuple)) or len(images) != 2:
-                raise ValueError("Each sample must contain two camera views: (img1, img2)")
-            img1, img2 = images
-            if "qwen3vl" not in img1 or "qwen3vl" not in img2:
-                raise ValueError("Each view must contain raw image under key 'qwen3vl'")
-            image_pairs.append([img1["qwen3vl"], img2["qwen3vl"]])
-            instructions.append(instruction)
-            action_chunks.append(action_chunk)
-            action_chunk_masks.append(action_chunk_mask)
-            states.append(state)
-
-        texts = []
-        for pair, instruction in zip(image_pairs, instructions):
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "image": pair[0]},
-                        {"type": "image", "image": pair[1]},
-                        {"type": "text", "text": str(instruction)},
-                    ],
-                }
-            ]
-            texts.append(
-                self.processor.apply_chat_template(
-                    messages,
-                    tokenize=False,
-                    add_generation_prompt=False,
-                )
-            )
-
-        processed = self.processor(
-            text=texts,
-            images=image_pairs,
-            padding=True,
-            return_tensors="pt",
-        )
-        samples = {
-            key: processed[key]
-            for key in ("input_ids", "attention_mask", "pixel_values", "image_grid_thw")
-            if key in processed
-        }
-
-        action_chunks = torch.stack(action_chunks, dim=0)
-        action_chunk_masks = torch.stack(action_chunk_masks, dim=0)
-        states = torch.stack(states, dim=0)
-
-        return samples, instructions, states, action_chunks, action_chunk_masks

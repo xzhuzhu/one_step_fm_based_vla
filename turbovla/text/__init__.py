@@ -1,1 +1,1 @@
-"""Text-cache construction utilities."""
+"""BERT encoding and instruction attention masks."""

@@ -33,7 +33,7 @@ if [[ "$NPROC_PER_NODE" -lt 1 ]]; then
   echo "TRAIN_GPUS must contain at least one GPU" >&2
   exit 2
 fi
-if [[ ! -x "$PYTHON_BIN" ]]; then
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   echo "Python executable not found: $PYTHON_BIN" >&2
   exit 2
 fi
@@ -67,7 +67,7 @@ mkdir -p "$CHECKPOINT_DIR"
 exec env CUDA_VISIBLE_DEVICES="$TRAIN_GPUS" "$PYTHON_BIN" -m torch.distributed.run \
   --nproc_per_node="$NPROC_PER_NODE" \
   --master_port="$MASTER_PORT" \
-  experiments/libero/train_history12_dinov3_r3m_controlled_causal_state_v15.py \
+  --module turbovla.training.train_mixed \
   --dataset_dirs "$DATASET_DIRS" \
   --stats_path experiments/libero/configs/libero_all4_stats.json \
   --stats_key libero_all4_no_noops \
@@ -79,8 +79,6 @@ exec env CUDA_VISIBLE_DEVICES="$TRAIN_GPUS" "$PYTHON_BIN" -m torch.distributed.r
   --resume_mode "$RESUME_MODE" \
   --batch_size 8 \
   --grad_accum_steps 1 \
-  --lr 5e-5 \
-  --weight_decay 1e-10 \
   --head_lr 5e-5 \
   --dinov3_lr 5e-5 \
   --head_weight_decay 1e-10 \

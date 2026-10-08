@@ -44,20 +44,18 @@ def _split_dataset_dirs(dataset_dirs: str | os.PathLike[str] | list[str] | tuple
 class LiberoMixedRLDSDataset(_BaseLiberoRLDSDataset):
     def __init__(
         self,
-        dataset_dir,
-        *args,
+        *,
         dataset_dirs: str | os.PathLike[str] | list[str] | tuple[str, ...],
         stats_path: str | os.PathLike[str],
         stats_key: str | None = None,
         normalize_binary_gripper: str = "auto",
         **kwargs,
     ):
-        kwargs.pop("dataset_dir", None)
         self.dataset_dirs = _split_dataset_dirs(dataset_dirs)
         # The mixed suite's parsed list is authoritative; a trainer may still
         # carry the original comma-separated CLI string.
         kwargs["r3m_cache_dataset_dirs"] = self.dataset_dirs
-        super().__init__(self.dataset_dirs[0], *args, **kwargs)
+        super().__init__(self.dataset_dirs[0], **kwargs)
 
         self.stats_path = str(stats_path)
         self.stats_key = stats_key

@@ -13,14 +13,9 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from ..data.libero_rlds import (
-    LiberoRLDSDataset,
-    Qwen3VLCollator,
-    vla_collate_fn,
-)
-from ..models.turbovla import (
-    build_turbovla,
-)
+from ..data.libero_rlds import vla_collate_fn
+from ..data.mixed_suite import LiberoMixedRLDSDataset
+from ..models.turbovla import build_turbovla
 from ..models.flow_checkpoint import assert_flow_checkpoint_compatible
 
 
@@ -33,6 +28,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train FinalVLA on four LIBERO suites")
     for name in ("dinov3_path", "bert_path", "r3m_path"):
         parser.add_argument(f"--{name}", required=True)
+    for name in ("dataset_dirs", "stats_path", "stats_key"):
+        parser.add_argument(f"--{name}", required=True)
     parser.add_argument("--r3m_feature_cache_path", default="")
     parser.add_argument("--checkpoint_dir", default="outputs/finalvla")
     parser.add_argument("--checkpoint_prefix", default="finalvla_step")
@@ -40,10 +37,8 @@ def parse_args():
     parser.add_argument("--init_checkpoint", default="")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--grad_accum_steps", type=int, default=1)
-    parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--head_lr", type=float, default=5e-5)
     parser.add_argument("--dinov3_lr", type=float, default=5e-5)
-    parser.add_argument("--weight_decay", type=float, default=1e-10)
     parser.add_argument("--head_weight_decay", type=float, default=1e-10)
     parser.add_argument("--dinov3_weight_decay", type=float, default=1e-10)
     parser.add_argument("--max_steps", type=int, default=100000)
@@ -58,61 +53,59 @@ def parse_args():
     parser.add_argument("--step_mix_buffer_size", type=int, default=64)
     parser.add_argument("--seed", type=int, default=42)
     parser.set_defaults(
-        dataset_dir="", dataset_split="train", backbone="dinov3", qwen3vl_path="",
-        action_head="flow_matching", flow_num_heads=4, flow_condition_layers=4,
-        flow_dit_layers=16, flow_target_tokens=16, flow_static_tokens=8,
-        flow_state_dim=8, flow_bijection_blocks=6,
-        flow_state_encoding="state_tokens_zero_pad", action_dim=7, chunk_size=12,
-        state_dim=8, num_state_tokens=2, use_r3m=True, r3m_model="resnet18",
-        freeze_r3m=True, r3m_encode_chunk_size=32,
+        dataset_split='train',
+        action_head='flow_matching',
+        flow_num_heads=4,
+        flow_condition_layers=4,
+        flow_dit_layers=16,
+        flow_target_tokens=16,
+        flow_static_tokens=8,
+        flow_state_dim=8,
+        flow_bijection_blocks=6,
+        flow_state_encoding='state_tokens_zero_pad',
+        action_dim=7,
+        chunk_size=12,
+        state_dim=8,
+        num_state_tokens=2,
+        use_r3m=True,
+        r3m_model='resnet18',
+        freeze_r3m=True,
+        r3m_encode_chunk_size=32,
         text_padding_length=21,
-        text_layout_path="experiments/libero/configs/online_text_layout.json",
-        freeze_text_encoder=True, frozen_text_cache=True,
-        pretrained_gdino_ckpt="", qwen3vl_lr=5e-5, qwen3vl_weight_decay=1e-10,
-        precision="bf16_amp", keep_latest_ckpt=False, save_final=True,
-        expected_image_size=256, hidden_dim=256, nheads=8,
-        dim_feedforward=2048, max_text_len=256,
-        vla_feature_enhancer_layers=6, enhancer_inner_dim=1024,
-        history_length=12, history_hidden_dim=256, history_layers=2,
-        history_encoder="mamba", history_dropout=0.0,
-        history_visual_dinov3=False, history_visual_encode_chunk_size=32,
-        history_visual_backprop=False, history_r3m=True,
+        text_layout_path='experiments/libero/configs/online_text_layout.json',
+        freeze_text_encoder=True,
+        frozen_text_cache=True,
+        precision='bf16_amp',
+        dinov3_precision='bf16_autocast',
+        expected_image_size=256,
+        hidden_dim=256,
+        nheads=8,
+        dim_feedforward=2048,
+        max_text_len=256,
+        vla_feature_enhancer_layers=6,
+        enhancer_inner_dim=1024,
+        history_length=12,
+        history_hidden_dim=256,
+        history_layers=2,
+        history_encoder='mamba',
+        history_dropout=0.0,
+        history_r3m=True,
         history_r3m_rope_base=10000.0,
-        history_r3m_memory_num_queries=2, history_r3m_memory_num_heads=4,
-        history_r3m_memory_dropout=0.1, history_r3m_memory_gate_init=0.1,
-        history_r3m_memory_dynamic_gate=False,
-        history_r3m_memory_residual_gate=False,
-        history_r3m_memory_token_dropout=0.0,
-        history_r3m_memory_rope_values=False,
-        history_r3m_intentional_memory=False,
-        history_r3m_intentional_operator_rank=64,
-        history_r3m_predictive_belief=True,
+        history_r3m_memory_num_queries=2,
+        history_r3m_memory_num_heads=4,
+        history_r3m_memory_dropout=0.1,
+        history_r3m_memory_gate_init=0.1,
         history_r3m_belief_num_slots=4,
-        history_r3m_belief_future_horizons="1,4,8,12",
-        history_r3m_controlled_causal_belief=True,
-        history_r3m_tacit_belief_fusion=True,
         history_r3m_tacit_belief_gate_init=0.1,
-        text_dropout=0.0, fusion_dropout=0.0, fusion_droppath=0.1,
-        allow_hf_download=False, shuffle_steps_within_episode=True,
-        freeze_backbones=False, require_feature_enhancer_preload=False,
-        load_text_proj_from_gdino=False, require_text_proj_preload=False,
+        text_dropout=0.0,
+        fusion_dropout=0.0,
+        fusion_droppath=0.1,
+        allow_hf_download=False,
+        shuffle_steps_within_episode=True,
+        freeze_backbones=False,
     )
     args = parser.parse_args()
-    args.history_scratch_init = args.resume_mode == "none" and not args.init_checkpoint
     return args
-
-
-def parse_fusion_layers(value):
-    """Parse a comma-separated list of 0-based DINOv3 block indices."""
-    if not value:
-        return ()
-    raw_items = [item.strip() for item in str(value).split(",") if item.strip()]
-    try:
-        return tuple(int(item) for item in raw_items)
-    except ValueError:
-        raise argparse.ArgumentTypeError(
-            f"dinov3_fusion_layers must be comma-separated integers, got {value!r}"
-        )
 
 
 def set_seed(seed):
@@ -151,112 +144,7 @@ def cleanup_distributed():
         dist.destroy_process_group()
 
 
-class CachedTextBank:
-    def __init__(self, payload, path):
-        if not isinstance(payload, dict):
-            raise ValueError(f"text cache at {path} must be a dict")
-        for key in ["instructions", "last_hidden_state", "attention_mask"]:
-            if key not in payload:
-                raise ValueError(f"text cache at {path} missing required key: {key}")
-
-        self.path = path
-        self.instructions = [str(item) for item in payload["instructions"]]
-        raw_mapping = payload.get("instruction_to_index")
-        if raw_mapping is None:
-            raw_mapping = {instruction: idx for idx, instruction in enumerate(self.instructions)}
-        self.instruction_to_index = {str(key): int(value) for key, value in raw_mapping.items()}
-        self.stripped_to_index = {}
-        for instruction, idx in self.instruction_to_index.items():
-            self.stripped_to_index.setdefault(instruction.strip(), idx)
-
-        self.last_hidden_state = payload["last_hidden_state"].detach().cpu().contiguous()
-        self.attention_mask = payload["attention_mask"].detach().cpu().bool().contiguous()
-        self.text_self_attention_masks = payload.get("text_self_attention_masks")
-        if self.text_self_attention_masks is not None:
-            self.text_self_attention_masks = self.text_self_attention_masks.detach().cpu().bool().contiguous()
-
-        if self.last_hidden_state.ndim != 3:
-            raise ValueError(f"last_hidden_state should be [N, L, H], got {self.last_hidden_state.shape}")
-        if self.attention_mask.ndim != 2:
-            raise ValueError(f"attention_mask should be [N, L], got {self.attention_mask.shape}")
-        if tuple(self.last_hidden_state.shape[:2]) != tuple(self.attention_mask.shape):
-            raise ValueError(
-                f"text cache shape mismatch: last_hidden_state={self.last_hidden_state.shape}, "
-                f"attention_mask={self.attention_mask.shape}"
-            )
-        if len(self.instructions) != self.last_hidden_state.shape[0]:
-            raise ValueError(
-                f"instruction count {len(self.instructions)} does not match cache rows "
-                f"{self.last_hidden_state.shape[0]}"
-            )
-
-    @classmethod
-    def load(cls, path):
-        if not os.path.isfile(path):
-            raise FileNotFoundError(
-                f"text cache not found: {path}. Build it first with build_libero_instruction_text_cache.py"
-            )
-        payload = torch.load(path, map_location="cpu")
-        return cls(payload, path)
-
-    @property
-    def text_hidden_dim(self):
-        return int(self.last_hidden_state.shape[-1])
-
-    def lookup(self, instructions):
-        indices = []
-        for instruction in instructions:
-            instruction = str(instruction)
-            idx = self.instruction_to_index.get(instruction)
-            if idx is None:
-                idx = self.stripped_to_index.get(instruction.strip())
-            if idx is None:
-                known = "\n".join(f"- {item}" for item in self.instructions[:20])
-                raise KeyError(
-                    f"instruction not found in text cache: {instruction!r}\nKnown cached instructions:\n{known}"
-                )
-            indices.append(idx)
-
-        idx_tensor = torch.tensor(indices, dtype=torch.long)
-        result = {
-            "last_hidden_state": self.last_hidden_state.index_select(0, idx_tensor),
-            "attention_mask": self.attention_mask.index_select(0, idx_tensor),
-        }
-        if self.text_self_attention_masks is not None:
-            result["text_self_attention_masks"] = self.text_self_attention_masks.index_select(0, idx_tensor)
-        return result
-
-
 def build_model_architecture(args):
-    if getattr(args, "backbone", "dinov3") == "qwen3vl":
-        if not args.qwen3vl_path:
-            raise ValueError("--qwen3vl_path is required when --backbone=qwen3vl")
-        from ..models.turbovla_qwen3vl import build_qwen3vl_vla
-
-        model_args = DummyArgs()
-        model_args.QWEN3VL_PATH = args.qwen3vl_path
-        model_args.hidden_dim = args.hidden_dim
-        model_args.nheads = args.nheads
-        model_args.dim_feedforward = args.dim_feedforward
-        model_args.action_dim = args.action_dim
-        model_args.chunk_size = args.chunk_size
-        model_args.state_dim = args.state_dim
-        model_args.num_state_tokens = args.num_state_tokens
-        model_args.freeze_backbone = args.freeze_backbones
-        model_args.local_files_only = not args.allow_hf_download
-        model_args.action_head = args.action_head
-        model_args.flow_num_heads = args.flow_num_heads
-        model_args.flow_condition_layers = args.flow_condition_layers
-        model_args.flow_dit_layers = args.flow_dit_layers
-        model_args.flow_target_tokens = args.flow_target_tokens
-        model_args.flow_static_tokens = args.flow_static_tokens
-        model_args.flow_state_dim = args.flow_state_dim
-        model_args.flow_bijection_blocks = args.flow_bijection_blocks
-        model_args.flow_state_encoding = args.flow_state_encoding
-        model = build_qwen3vl_vla(model_args)
-        # Keep the Qwen3-VL backbone in BF16 to halve memory and checkpoint size.
-        model.qwen3vl.to(dtype=torch.bfloat16)
-        return model
 
     text_layout = {}
     if args.text_layout_path:
@@ -311,30 +199,13 @@ def build_model_architecture(args):
     model_args.history_layers = args.history_layers
     model_args.history_encoder = args.history_encoder
     model_args.history_dropout = args.history_dropout
-    model_args.history_visual_dinov3 = args.history_visual_dinov3
-    model_args.history_visual_encode_chunk_size = args.history_visual_encode_chunk_size
-    model_args.history_visual_backprop = args.history_visual_backprop
     model_args.history_r3m = args.history_r3m
     model_args.history_r3m_rope_base = args.history_r3m_rope_base
     model_args.history_r3m_memory_num_queries = args.history_r3m_memory_num_queries
     model_args.history_r3m_memory_num_heads = args.history_r3m_memory_num_heads
     model_args.history_r3m_memory_dropout = args.history_r3m_memory_dropout
     model_args.history_r3m_memory_gate_init = args.history_r3m_memory_gate_init
-    model_args.history_r3m_memory_dynamic_gate = args.history_r3m_memory_dynamic_gate
-    model_args.history_r3m_memory_residual_gate = args.history_r3m_memory_residual_gate
-    model_args.history_r3m_memory_token_dropout = args.history_r3m_memory_token_dropout
-    model_args.history_r3m_memory_rope_values = args.history_r3m_memory_rope_values
-    model_args.history_r3m_intentional_memory = args.history_r3m_intentional_memory
-    model_args.history_r3m_intentional_operator_rank = (
-        args.history_r3m_intentional_operator_rank
-    )
-    model_args.history_r3m_predictive_belief = args.history_r3m_predictive_belief
     model_args.history_r3m_belief_num_slots = args.history_r3m_belief_num_slots
-    model_args.history_r3m_belief_future_horizons = args.history_r3m_belief_future_horizons
-    model_args.history_r3m_controlled_causal_belief = (
-        args.history_r3m_controlled_causal_belief
-    )
-    model_args.history_r3m_tacit_belief_fusion = args.history_r3m_tacit_belief_fusion
     model_args.history_r3m_tacit_belief_gate_init = args.history_r3m_tacit_belief_gate_init
     model_args.use_r3m = args.use_r3m
     model_args.r3m_path = args.r3m_path
@@ -342,17 +213,6 @@ def build_model_architecture(args):
     model_args.freeze_r3m = args.freeze_r3m
     model_args.r3m_encode_chunk_size = args.r3m_encode_chunk_size
     return build_turbovla(model_args)
-
-
-def freeze_backbones(model):
-    for name, param in model.named_parameters():
-        if (
-            name.startswith("vision_encoder.backbone")
-            or name.startswith("text_encoder.bert")
-            or name.startswith("dinov3")
-            or name.startswith("qwen3vl")
-        ):
-            param.requires_grad = False
 
 
 def get_latest_checkpoint(ckpt_dir, prefix):
@@ -368,27 +228,6 @@ def get_latest_checkpoint(ckpt_dir, prefix):
             return -1
 
     return max(ckpts, key=extract_step)
-
-
-def prune_old_checkpoints(ckpt_dir, prefix, keep_latest_path, logger=print):
-    """Remove older checkpoints so only the newest one remains on disk."""
-    keep_name = os.path.basename(keep_latest_path)
-    for path in glob.glob(os.path.join(ckpt_dir, f"{prefix}_*.pth")):
-        if os.path.basename(path) == keep_name:
-            continue
-        try:
-            os.remove(path)
-            logger(f"pruned old checkpoint: {path}")
-        except OSError as exc:
-            logger(f"failed to prune {path}: {exc}")
-
-
-def masked_l1_loss(pred, target, mask):
-    l1 = torch.abs(pred - target)
-    mask = mask.unsqueeze(-1).float()
-    l1 = l1 * mask
-    denom = (mask.sum() * pred.shape[-1]).clamp_min(1.0)
-    return l1.sum() / denom
 
 
 def build_scheduler(optimizer, max_steps, warmup_steps, min_lr_ratio=0.1):
@@ -417,13 +256,11 @@ def _use_weight_decay(name, param):
 
 
 def build_param_group_optimizer(model, args):
-    head_lr = args.lr if args.head_lr is None else args.head_lr
-    head_wd = args.weight_decay if args.head_weight_decay is None else args.head_weight_decay
+    head_lr = args.head_lr
+    head_wd = args.head_weight_decay
     grouped = {
         ("dinov3_decay", args.dinov3_lr, args.dinov3_weight_decay): [],
         ("dinov3_no_decay", args.dinov3_lr, 0.0): [],
-        ("qwen3vl_decay", args.qwen3vl_lr, args.qwen3vl_weight_decay): [],
-        ("qwen3vl_no_decay", args.qwen3vl_lr, 0.0): [],
         ("head_decay", head_lr, head_wd): [],
         ("head_no_decay", head_lr, 0.0): [],
     }
@@ -431,16 +268,11 @@ def build_param_group_optimizer(model, args):
         if not param.requires_grad:
             continue
         is_dino = name.startswith("vision_encoder.backbone") or name.startswith("dinov3")
-        is_qwen = name.startswith("qwen3vl")
         decay = _use_weight_decay(name, param)
         if is_dino and decay:
             key = ("dinov3_decay", args.dinov3_lr, args.dinov3_weight_decay)
         elif is_dino:
             key = ("dinov3_no_decay", args.dinov3_lr, 0.0)
-        elif is_qwen and decay:
-            key = ("qwen3vl_decay", args.qwen3vl_lr, args.qwen3vl_weight_decay)
-        elif is_qwen:
-            key = ("qwen3vl_no_decay", args.qwen3vl_lr, 0.0)
         elif decay:
             key = ("head_decay", head_lr, head_wd)
         else:
@@ -480,108 +312,6 @@ def _extract_state_dict(ckpt_obj):
     raise ValueError("unsupported checkpoint format")
 
 
-def load_feature_enhancer_from_groundingdino(model, ckpt_path):
-    if not os.path.isfile(ckpt_path):
-        raise FileNotFoundError(f"checkpoint not found: {ckpt_path}")
-
-    ckpt = torch.load(ckpt_path, map_location="cpu")
-    source_state = _extract_state_dict(ckpt)
-    source_state = {(k[7:] if k.startswith("module.") else k): v for k, v in source_state.items()}
-
-    target_state = model.state_dict()
-    mapped = {}
-    skipped_missing = 0
-    skipped_shape = 0
-    missing_keys = []
-    shape_mismatch_keys = []
-
-    prefix_pairs = [
-        ("transformer.encoder.fusion_layers.", "feature_enhancer.fusion_layers."),
-        ("transformer.encoder.text_layers.", "feature_enhancer.text_layers."),
-    ]
-
-    for src_key, tensor in source_state.items():
-        tgt_key = None
-        for src_prefix, tgt_prefix in prefix_pairs:
-            if src_key.startswith(src_prefix):
-                tgt_key = tgt_prefix + src_key[len(src_prefix):]
-                break
-        if tgt_key is None:
-            continue
-        if tgt_key not in target_state:
-            skipped_missing += 1
-            missing_keys.append((src_key, tgt_key))
-            continue
-        if target_state[tgt_key].shape != tensor.shape:
-            skipped_shape += 1
-            shape_mismatch_keys.append((src_key, tgt_key, tuple(tensor.shape), tuple(target_state[tgt_key].shape)))
-            continue
-        mapped[tgt_key] = tensor
-
-    if not mapped:
-        raise RuntimeError("no feature-enhancer parameters were mapped from checkpoint")
-
-    target_state.update(mapped)
-    missing, unexpected = model.load_state_dict(target_state, strict=False)
-    return {
-        "mapped": len(mapped),
-        "skipped_missing": skipped_missing,
-        "skipped_shape": skipped_shape,
-        "load_missing_after_update": len(missing),
-        "load_unexpected_after_update": len(unexpected),
-        "missing_keys": missing_keys,
-        "shape_mismatch_keys": shape_mismatch_keys,
-    }
-
-
-def load_text_proj_from_groundingdino(model, ckpt_path):
-    if not os.path.isfile(ckpt_path):
-        raise FileNotFoundError(f"checkpoint not found: {ckpt_path}")
-
-    ckpt = torch.load(ckpt_path, map_location="cpu")
-    source_state = _extract_state_dict(ckpt)
-    source_state = {(k[7:] if k.startswith("module.") else k): v for k, v in source_state.items()}
-
-    target_state = model.state_dict()
-    mapped = {}
-    skipped_missing = 0
-    skipped_shape = 0
-    missing_keys = []
-    shape_mismatch_keys = []
-
-    for src_key, tensor in source_state.items():
-        tgt_key = None
-        if src_key.startswith("feat_map."):
-            tgt_key = "text_proj." + src_key[len("feat_map."):]
-        else:
-            continue
-
-        if tgt_key not in target_state:
-            skipped_missing += 1
-            missing_keys.append((src_key, tgt_key))
-            continue
-        if target_state[tgt_key].shape != tensor.shape:
-            skipped_shape += 1
-            shape_mismatch_keys.append((src_key, tgt_key, tuple(tensor.shape), tuple(target_state[tgt_key].shape)))
-            continue
-        mapped[tgt_key] = tensor
-
-    if not mapped:
-        raise RuntimeError("no text projection parameters were mapped from checkpoint")
-
-    target_state.update(mapped)
-    missing, unexpected = model.load_state_dict(target_state, strict=False)
-    return {
-        "mapped": len(mapped),
-        "skipped_missing": skipped_missing,
-        "skipped_shape": skipped_shape,
-        "load_missing_after_update": len(missing),
-        "load_unexpected_after_update": len(unexpected),
-        "missing_keys": missing_keys,
-        "shape_mismatch_keys": shape_mismatch_keys,
-    }
-
-
 def move_samples_to_device(samples, device):
     if isinstance(samples, dict):
         return {k: v.to(device, non_blocking=True) for k, v in samples.items()}
@@ -591,149 +321,16 @@ def move_samples_to_device(samples, device):
 def train_model():
     args = parse_args()
     if args.use_r3m:
-        if args.backbone != "dinov3":
-            raise ValueError("R3M fusion requires --backbone dinov3")
         if not args.r3m_path or not os.path.isfile(args.r3m_path):
             raise FileNotFoundError(f"R3M checkpoint not found: {args.r3m_path}")
         if not args.freeze_r3m:
             raise ValueError("this R3M fusion recipe requires --freeze_r3m")
         if args.r3m_encode_chunk_size < 1:
             raise ValueError("R3M encode chunk size must be positive")
-        if args.history_visual_dinov3:
-            raise ValueError("R3M fusion experiment removes image history; use --no_history_visual_dinov3")
         if args.r3m_feature_cache_path and not args.freeze_r3m:
             raise ValueError("r3m_feature_cache_path requires --freeze_r3m; cached raw features cannot train R3M")
-    if args.history_r3m:
-        if not args.use_r3m or args.history_length != 12:
-            raise ValueError("R3M history requires --use_r3m and --history_length 12")
-        if args.history_r3m_memory_num_queries < 1:
-            raise ValueError("R3M history memory query count must be positive")
-        if args.history_r3m_memory_num_heads < 1:
-            raise ValueError("R3M history memory head count must be positive")
-        if args.history_hidden_dim % args.history_r3m_memory_num_heads:
-            raise ValueError("R3M history hidden dimension must be divisible by memory heads")
-        if not 0.0 <= args.history_r3m_memory_dropout < 1.0:
-            raise ValueError("R3M history memory dropout must be in [0, 1)")
-        if not 0.0 < args.history_r3m_memory_gate_init < 1.0:
-            raise ValueError("R3M history memory gate init must be in (0, 1)")
-        if not 0.0 <= args.history_r3m_memory_token_dropout < 1.0:
-            raise ValueError("R3M history memory token dropout must be in [0, 1)")
-        if args.history_r3m_memory_dynamic_gate and args.history_r3m_memory_residual_gate:
-            raise ValueError("dynamic and residual R3M memory gating are mutually exclusive")
-        if args.history_r3m_intentional_operator_rank < 1:
-            raise ValueError("intentional R3M operator rank must be positive")
-        if args.history_r3m_intentional_operator_rank > args.history_hidden_dim:
-            raise ValueError(
-                "intentional R3M operator rank cannot exceed the history hidden dimension"
-            )
-        try:
-            belief_horizons = tuple(
-                int(value.strip())
-                for value in args.history_r3m_belief_future_horizons.split(",")
-                if value.strip()
-            )
-        except ValueError as exc:
-            raise ValueError("predictive belief horizons must be comma-separated integers") from exc
-        if not belief_horizons or tuple(sorted(set(belief_horizons))) != belief_horizons:
-            raise ValueError("predictive belief horizons must be positive, sorted, and unique")
-        if belief_horizons[0] < 1:
-            raise ValueError("predictive belief horizons must be positive")
-        args.history_r3m_belief_future_horizons = belief_horizons
-        if args.history_r3m_intentional_memory:
-            if not args.history_r3m_memory_rope_values:
-                raise ValueError("intentional R3M memory requires full key/value RoPE")
-            if args.history_r3m_predictive_belief:
-                raise ValueError(
-                    "intentional R3M memory and predictive belief are mutually exclusive"
-                )
-            if (
-                args.history_r3m_memory_dynamic_gate
-                or args.history_r3m_memory_residual_gate
-                or args.history_r3m_memory_token_dropout
-                or args.history_r3m_tacit_belief_fusion
-            ):
-                raise ValueError(
-                    "intentional R3M memory is a single ungated path and cannot use "
-                    "memory gates, token dropout, or tacit-belief fusion"
-                )
-        if args.history_r3m_predictive_belief or args.history_r3m_intentional_memory:
-            if args.history_r3m_memory_rope_values:
-                if args.history_r3m_predictive_belief:
-                    raise ValueError(
-                        "predictive belief requires --no_history_r3m_memory_rope_values"
-                    )
-            if args.history_r3m_predictive_belief and args.history_r3m_belief_num_slots < 1:
-                raise ValueError("predictive belief slot count must be positive")
-        if args.history_r3m_tacit_belief_fusion:
-            if not args.history_r3m_predictive_belief:
-                raise ValueError("tacit-belief fusion requires --history_r3m_predictive_belief")
-            if not 0.0 < args.history_r3m_tacit_belief_gate_init < 1.0:
-                raise ValueError("tacit-belief fusion gate init must be in (0, 1)")
-        if args.history_r3m_controlled_causal_belief:
-            if not args.history_r3m_predictive_belief:
-                raise ValueError(
-                    "controlled causal belief requires --history_r3m_predictive_belief"
-                )
-            if not args.history_r3m_tacit_belief_fusion:
-                raise ValueError(
-                    "controlled causal belief requires --history_r3m_tacit_belief_fusion"
-                )
-            if args.history_r3m_intentional_memory:
-                raise ValueError(
-                    "controlled causal belief and intentional R3M memory are mutually exclusive"
-                )
-    elif (
-        args.history_r3m_memory_dynamic_gate
-        or args.history_r3m_memory_residual_gate
-        or args.history_r3m_memory_token_dropout
-        or args.history_r3m_intentional_memory
-        or args.history_r3m_predictive_belief
-        or args.history_r3m_tacit_belief_fusion
-        or args.history_r3m_controlled_causal_belief
-    ):
-        raise ValueError("R3M memory variants require --history_r3m")
-    if args.history_length:
-        if args.backbone != "dinov3" or args.action_head != "flow_matching":
-            raise ValueError("history training requires --backbone dinov3 and --action_head flow_matching")
-        if (
-            args.history_length not in {4, 12}
-            or args.state_dim != 8
-            or args.action_dim != 7
-            or args.chunk_size != 12
-            or args.history_hidden_dim != 256
-            or args.history_layers != 2
-            or args.history_encoder != "mamba"
-            or args.history_dropout != 0.0
-        ):
-            raise ValueError(
-                "history training requires H in {4, 12}, 8D state, "
-                "2x256 Mamba, and 12x7 output"
-            )
-        if args.freeze_backbones:
-            raise ValueError("history training requires --no_freeze_backbones so DINOv3 is trainable")
-        if not args.freeze_text_encoder:
-            raise ValueError("history training requires --freeze_text_encoder so BERT remains frozen")
-        if not args.init_checkpoint and args.resume_mode == "none" and not args.history_scratch_init:
-            raise ValueError("history training requires --init_checkpoint pointing to the 95k checkpoint")
-        if args.history_visual_dinov3 and args.history_visual_encode_chunk_size < 1:
-            raise ValueError("DINOv3 visual history encode chunk size must be positive")
-        if args.history_scratch_init and (
-            args.init_checkpoint or args.resume_mode != "none" or args.pretrained_gdino_ckpt
-        ):
-            raise ValueError(
-                "--history_scratch_init cannot be combined with init, resume, or GroundingDINO weights"
-            )
     if args.init_checkpoint and args.resume_mode != "none":
         raise ValueError("--init_checkpoint cannot be combined with --resume_mode")
-    if args.init_checkpoint and args.pretrained_gdino_ckpt:
-        raise ValueError(
-            "--init_checkpoint already supplies all weights and cannot be combined "
-            "with --pretrained_gdino_ckpt"
-        )
-    if args.head_lr is None:
-        args.head_lr = args.lr
-    if args.head_weight_decay is None:
-        args.head_weight_decay = args.weight_decay
     if args.precision == "bf16_amp":
         if not torch.cuda.is_available():
             raise ValueError("bf16_amp precision requires CUDA")
@@ -752,92 +349,32 @@ def train_model():
     is_distributed, rank, world_size, local_rank, device = setup_distributed()
 
     try:
-        is_qwen3vl = getattr(args, "backbone", "dinov3") == "qwen3vl"
         resume_candidate = None
         if args.resume_mode != "none":
             resume_candidate = get_latest_checkpoint(args.checkpoint_dir, args.checkpoint_prefix)
 
-        if is_qwen3vl:
-            if not args.qwen3vl_path:
-                raise ValueError("--qwen3vl_path is required when --backbone=qwen3vl")
-            text_cache = None
-        else:
-            if not args.bert_path:
-                raise ValueError("--bert_path is required when --backbone=dinov3")
-            text_cache = None
+        if not args.bert_path:
+            raise ValueError("--bert_path is required when --backbone=dinov3")
 
         model = build_model_architecture(args)
 
-        if not is_qwen3vl:
-            need_any_gdino_preload = (
-                args.require_feature_enhancer_preload
-                or args.require_text_proj_preload
-                or args.load_text_proj_from_gdino
-            )
-            if (
-                resume_candidate is None
-                and not args.init_checkpoint
-                and not args.pretrained_gdino_ckpt
-                and need_any_gdino_preload
-            ):
-                raise ValueError(
-                    "`--pretrained_gdino_ckpt` is required for requested preload options "
-                    "(feature-enhancer and/or text_proj)"
-                )
-
-            if resume_candidate is None and not args.init_checkpoint and args.pretrained_gdino_ckpt:
-                if args.require_feature_enhancer_preload:
-                    fe_report = load_feature_enhancer_from_groundingdino(model, args.pretrained_gdino_ckpt)
-                    if rank == 0:
-                        print("feature-enhancer preload from GroundingDINO:")
-                        print(f"  ckpt: {args.pretrained_gdino_ckpt}")
-                        print(f"  mapped={fe_report['mapped']}")
-                        print(f"  skipped_missing={fe_report['skipped_missing']}")
-                        print(f"  skipped_shape={fe_report['skipped_shape']}")
-                        print("missing_keys:", fe_report["missing_keys"])
-                        print("shape_mismatch_keys:", fe_report["shape_mismatch_keys"])
-
-                if args.load_text_proj_from_gdino:
-                    text_proj_report = load_text_proj_from_groundingdino(model, args.pretrained_gdino_ckpt)
-                    if rank == 0:
-                        print("text projection preload from GroundingDINO:")
-                        print(f"  ckpt: {args.pretrained_gdino_ckpt}")
-                        print(f"  mapped={text_proj_report['mapped']}")
-                        print(f"  skipped_missing={text_proj_report['skipped_missing']}")
-                        print(f"  skipped_shape={text_proj_report['skipped_shape']}")
-                        print("missing_keys:", text_proj_report["missing_keys"])
-                        print("shape_mismatch_keys:", text_proj_report["shape_mismatch_keys"])
-                elif args.require_text_proj_preload:
-                    raise ValueError(
-                        "text projection preload is required, but `--no_load_text_proj_from_gdino` was set"
-                    )
-
-        if args.freeze_backbones:
-            freeze_backbones(model)
 
         if rank == 0:
             trainable = [n for n, p in model.named_parameters() if p.requires_grad]
             frozen = [n for n, p in model.named_parameters() if not p.requires_grad]
             print(f"device={device}, distributed={is_distributed}, world_size={world_size}")
-            print(f"backbone={args.backbone}")
-            if is_qwen3vl:
-                print(f"qwen3vl_path={args.qwen3vl_path}")
-            else:
-                print(f"dinov3_path={args.dinov3_path}")
-                print(f"bert_path={args.bert_path}")
-                print(
-                    f"r3m_enabled={args.use_r3m}, r3m_path={args.r3m_path or None}, "
-                    f"r3m_frozen={args.freeze_r3m}"
-                )
-                print(f"text_padding_length={args.text_padding_length}")
-            print(f"pretrained_gdino_ckpt={args.pretrained_gdino_ckpt}")
-            print(f"load_text_proj_from_gdino={args.load_text_proj_from_gdino}")
+            print(f"dinov3_path={args.dinov3_path}")
+            print(f"bert_path={args.bert_path}")
+            print(
+                f"r3m_enabled={args.use_r3m}, r3m_path={args.r3m_path or None}, "
+                f"r3m_frozen={args.freeze_r3m}"
+            )
+            print(f"text_padding_length={args.text_padding_length}")
             print(f"max_steps={args.max_steps}, lr_schedule_steps={args.lr_schedule_steps}")
             print(
                 f"precision={args.precision}, head_lr={args.head_lr}, "
-                f"dinov3_lr={args.dinov3_lr}, qwen3vl_lr={args.qwen3vl_lr}, "
+                f"dinov3_lr={args.dinov3_lr}, "
                 f"head_wd={args.head_weight_decay}, dinov3_wd={args.dinov3_weight_decay}, "
-                f"qwen3vl_wd={args.qwen3vl_weight_decay}"
             )
             print(f"warmup_steps={args.warmup_steps}, min_lr_ratio={args.min_lr_ratio}")
             print(
@@ -929,8 +466,10 @@ def train_model():
 
         model_to_load = unwrap_model(model)
 
-        dataset = LiberoRLDSDataset(
-            dataset_dir=args.dataset_dir,
+        dataset = LiberoMixedRLDSDataset(
+            dataset_dirs=args.dataset_dirs,
+            stats_path=args.stats_path,
+            stats_key=args.stats_key,
             LOCAL_DINOV3_PATH=args.dinov3_path,
             rank=rank,
             world_size=world_size,
@@ -942,28 +481,15 @@ def train_model():
             seed=args.seed,
             local_files_only=not args.allow_hf_download,
             expected_image_size=args.expected_image_size,
-            backbone=args.backbone,
             use_r3m=args.use_r3m,
             history_length=args.history_length,
-            history_visual_dinov3=args.history_visual_dinov3,
             history_r3m=args.history_r3m,
             r3m_feature_cache_path=args.r3m_feature_cache_path,
             r3m_checkpoint_path=args.r3m_path,
-            r3m_cache_dataset_dirs=getattr(args, "dataset_dirs", None),
             r3m_cache_precision="bf16_autocast" if args.precision == "bf16_amp" else "fp32",
         )
 
-        if is_qwen3vl:
-            from transformers import Qwen3VLProcessor
-
-            qwen_processor = Qwen3VLProcessor.from_pretrained(
-                args.qwen3vl_path,
-                local_files_only=not args.allow_hf_download,
-            )
-            collate_fn = Qwen3VLCollator(qwen_processor)
-        else:
-            qwen_processor = None
-            collate_fn = vla_collate_fn
+        collate_fn = vla_collate_fn
 
         dataloader = DataLoader(
             dataset,
@@ -977,11 +503,6 @@ def train_model():
         data_iter = iter(dataloader)
 
         model.train()
-        if args.freeze_backbones:
-            if is_qwen3vl:
-                model_to_load.qwen3vl.eval()
-            else:
-                model_to_load.dinov3.eval()
 
         if rank == 0:
             per_gpu_effective_bs = args.batch_size * args.grad_accum_steps
@@ -1032,52 +553,26 @@ def train_model():
                     dtype=torch.bfloat16,
                     enabled=args.precision == "bf16_amp",
                 ):
-                    if is_qwen3vl and args.action_head == "flow_matching":
-                        outputs = model(
-                            samples,
-                            states,
-                            actions=gt_actions,
-                            action_masks=action_chunk_masks,
-                        )
-                        if not isinstance(outputs, dict) or "loss" not in outputs:
-                            raise TypeError("flow_matching model must return a dict containing loss")
-                        loss = outputs["loss"]
-                    elif is_qwen3vl:
-                        pred_actions = model(samples, states)
-                        if pred_actions.shape != gt_actions.shape:
-                            raise ValueError(
-                                f"pred_actions.shape={pred_actions.shape}, gt_actions.shape={gt_actions.shape} mismatch"
+                    outputs = model(
+                        instructions,
+                        samples,
+                        states,
+                        actions=gt_actions,
+                        action_masks=action_chunk_masks,
+                        history_states=history_states,
+                        history_mask=history_masks,
+                    )
+                    if not isinstance(outputs, dict) or "loss" not in outputs:
+                        raise TypeError("flow_matching model must return a dict containing loss")
+                    loss = outputs["loss"]
+                    for metric_name in (
+                        "belief_gain_mean",
+                        "belief_tacit_gate_mean",
+                    ):
+                        if metric_name in outputs:
+                            last_aux_metrics[metric_name] = float(
+                                outputs[metric_name].detach().item()
                             )
-                        loss = masked_l1_loss(pred_actions, gt_actions, action_chunk_masks)
-                    else:
-                        if args.action_head == "flow_matching":
-                            outputs = model(
-                                instructions,
-                                samples,
-                                states,
-                                actions=gt_actions,
-                                action_masks=action_chunk_masks,
-                                history_states=history_states,
-                                history_mask=history_masks,
-                            )
-                            if not isinstance(outputs, dict) or "loss" not in outputs:
-                                raise TypeError("flow_matching model must return a dict containing loss")
-                            loss = outputs["loss"]
-                            for metric_name in (
-                                "belief_gain_mean",
-                                "belief_tacit_gate_mean",
-                            ):
-                                if metric_name in outputs:
-                                    last_aux_metrics[metric_name] = float(
-                                        outputs[metric_name].detach().item()
-                                    )
-                        else:
-                            pred_actions = model(instructions, samples, states)
-                            if pred_actions.shape != gt_actions.shape:
-                                raise ValueError(
-                                    f"pred_actions.shape={pred_actions.shape}, gt_actions.shape={gt_actions.shape} mismatch"
-                                )
-                            loss = masked_l1_loss(pred_actions, gt_actions, action_chunk_masks)
                 (loss / args.grad_accum_steps).backward()
                 loss_accum += loss.detach().item()
 
@@ -1117,27 +612,16 @@ def train_model():
             should_save = global_step % args.save_steps == 0 or (
                 85000 <= global_step <= 99000 and global_step % 1000 == 0
             ) or (
-                args.save_final and global_step == args.max_steps
+                global_step == args.max_steps
             )
             if rank == 0 and should_save:
                 save_path = os.path.join(args.checkpoint_dir, f"{args.checkpoint_prefix}_{global_step}.pth")
                 model_state = unwrap_model(model).state_dict()
                 flow_model = unwrap_model(model)
-                flow_head = getattr(
-                    flow_model, "flow_action_policy", getattr(flow_model, "action_policy", None)
-                )
-                saved_flow_state_dim = int(
-                    getattr(flow_model, "flow_state_dim", getattr(flow_head, "state_dim", args.flow_state_dim))
-                )
-                saved_flow_blocks = int(
-                    getattr(flow_model, "flow_bijection_blocks", getattr(flow_head, "bijection_blocks", args.flow_bijection_blocks))
-                )
-                saved_flow_state_encoding = str(
-                    getattr(flow_model, "flow_state_encoding", getattr(flow_head, "state_encoding", args.flow_state_encoding))
-                )
-                saved_action_head = str(
-                    getattr(flow_model, "action_head_type", getattr(flow_model, "action_head", args.action_head))
-                )
+                saved_flow_state_dim = int(flow_model.flow_state_dim)
+                saved_flow_blocks = int(flow_model.flow_bijection_blocks)
+                saved_flow_state_encoding = str(flow_model.flow_state_encoding)
+                saved_action_head = str(flow_model.action_head_type)
                 tmp_save_path = save_path + ".tmp"
                 source_payload = ckpt if ckpt is not None else initialization_payload
                 save_payload = {
@@ -1181,162 +665,17 @@ def train_model():
                             },
                         },
                         "metadata": {
-                            "architecture": (
-                                "history12_dinov3_r3m_polanyi_from_to_intentional_memory_v14"
-                                if args.history_r3m_intentional_memory
-                                else "history12_dinov3_r3m_controlled_causal_state_v15"
-                                if args.history_r3m_controlled_causal_belief
-                                else "history12_dinov3_r3m_polanyi_tacit_belief_v13"
-                                if args.history_r3m_tacit_belief_fusion
-                                else "history12_dinov3_r3m_predictive_belief_v12"
-                                if args.history_r3m_predictive_belief
-                                else "history12_dinov3_r3m_current_conditioned_memory_rope_v8"
-                                if args.history_r3m
-                                else "history12_dinov3_r3m_v5"
-                                if args.history_length == 12 and args.use_r3m
-                                else
-                                "history12_dinov3_v4"
-                                if args.history_length == 12 and args.history_visual_dinov3
-                                else "history12_v2"
-                                if args.history_length == 12
-                                else "history_v1"
-                                if args.history_length == 4
-                                else "turbovla"
-                            ),
+                            "architecture": "history12_dinov3_r3m_controlled_causal_state_v15",
                             "history_length": args.history_length,
-                            "history_input": (
-                                "8D state trajectory + goal-operated full-RoPE tacit R3M memory"
-                                if args.history_r3m_intentional_memory
-                                else "8D state trajectory + goal-independent controlled causal R3M state"
-                                if args.history_r3m_controlled_causal_belief
-                                else "8D state trajectory + v8 tacit R3M memory with gated predictive correction"
-                                if args.history_r3m_tacit_belief_fusion
-                                else "task-conditioned predictive R3M belief and multi-horizon future tokens"
-                                if args.history_r3m_predictive_belief
-                                else "8D robot state + 4 current-conditioned view-separated R3M memory tokens"
-                                if args.history_r3m
-                                else "8D robot state + 2-view pooled DINOv3 visual history"
-                                if args.history_visual_dinov3
-                                else "8D robot state"
-                                if args.history_length
-                                else None
-                            ),
-                            "history_encoder": "2-layer Mamba, hidden=256" if args.history_length else None,
-                            "current_visual_input": (
-                                "2-view DINOv3 patch tokens + 2-view R3M ResNet-18 semantic tokens"
-                                if args.use_r3m
-                                else "2-view DINOv3 patch tokens"
-                            ),
-                            "r3m_encoder": "frozen_resnet18" if args.use_r3m else None,
-                            "r3m_current_tokens": 2 if args.use_r3m else 0,
-                            "history_visual_tokens": (
-                                args.history_r3m_memory_num_queries * 2
-                                if (
-                                    args.history_r3m_intentional_memory
-                                    or args.history_r3m_tacit_belief_fusion
-                                )
-                                else
-                                (
-                                    args.history_r3m_belief_num_slots * 2
-                                    + len(args.history_r3m_belief_future_horizons)
-                                )
-                                if args.history_r3m_predictive_belief
-                                else args.history_r3m_memory_num_queries * 2
-                                if args.history_r3m
-                                else args.history_length * 2
-                                if args.history_visual_dinov3
-                                else 0
-                            ),
-                            "history_visual_encoder": (
-                                "polanyi_from_to_goal_operator_full_rope_intentional_memory"
-                                if args.history_r3m_intentional_memory
-                                else "goal_free_controlled_history_belief"
-                                if args.history_r3m_controlled_causal_belief
-                                else "v8_full_rope_current_memory_plus_gated_predictive_belief_correction"
-                                if args.history_r3m_tacit_belief_fusion
-                                else "frozen_r3m_semantic_attention_plus_delta_mamba_predictive_belief"
-                                if args.history_r3m_predictive_belief
-                                else "shared_frozen_r3m_relative_rope_current_query_cross_attention_view_separate"
-                                if args.history_r3m
-                                else "shared_dinov3_mean_pool"
-                                if args.history_visual_dinov3
-                                else None
-                            ),
-                            "history_r3m_memory_num_queries": (
-                                args.history_r3m_memory_num_queries if args.history_r3m else None
-                            ),
-                            "history_r3m_memory_num_heads": (
-                                args.history_r3m_memory_num_heads if args.history_r3m else None
-                            ),
-                            "history_r3m_memory_dropout": (
-                                args.history_r3m_memory_dropout if args.history_r3m else None
-                            ),
-                            "history_r3m_memory_gate_init": (
-                                args.history_r3m_memory_gate_init if args.history_r3m else None
-                            ),
-                            "history_r3m_memory_dynamic_gate": (
-                                args.history_r3m_memory_dynamic_gate if args.history_r3m else None
-                            ),
-                            "history_r3m_memory_residual_gate": (
-                                args.history_r3m_memory_residual_gate if args.history_r3m else None
-                            ),
-                            "history_r3m_memory_token_dropout": (
-                                args.history_r3m_memory_token_dropout if args.history_r3m else None
-                            ),
-                            "history_r3m_memory_rope_values": (
-                                args.history_r3m_memory_rope_values if args.history_r3m else None
-                            ),
-                            "history_r3m_rope_base": (
-                                args.history_r3m_rope_base if args.history_r3m else None
-                            ),
-                            "history_r3m_predictive_belief": (
-                                args.history_r3m_predictive_belief if args.history_r3m else None
-                            ),
-                            "history_r3m_intentional_memory": (
-                                args.history_r3m_intentional_memory
-                                if args.history_r3m
-                                else None
-                            ),
-                            "history_r3m_intentional_operator_rank": (
-                                args.history_r3m_intentional_operator_rank
-                                if args.history_r3m_intentional_memory
-                                else None
-                            ),
-                            "history_r3m_tacit_belief_fusion": (
-                                args.history_r3m_tacit_belief_fusion
-                                if args.history_r3m_predictive_belief
-                                else None
-                            ),
-                            "history_r3m_controlled_causal_belief": (
-                                args.history_r3m_controlled_causal_belief
-                                if args.history_r3m_predictive_belief
-                                else None
-                            ),
-                            "history_r3m_tacit_belief_gate_init": (
-                                args.history_r3m_tacit_belief_gate_init
-                                if args.history_r3m_tacit_belief_fusion
-                                else None
-                            ),
-                            "history_r3m_belief_num_slots": (
-                                args.history_r3m_belief_num_slots
-                                if args.history_r3m_predictive_belief
-                                else None
-                            ),
-                            "history_r3m_belief_future_horizons": (
-                                list(args.history_r3m_belief_future_horizons)
-                                if args.history_r3m_predictive_belief
-                                else None
-                            ),
-                            "history_visual_backprop": (
-                                args.history_visual_backprop if args.history_visual_dinov3 else None
-                            ),
-                            "history_visual_encode_chunk_size": (
-                                args.history_visual_encode_chunk_size
-                                if args.history_visual_dinov3
-                                else None
-                            ),
+                            "history_input": "8D state trajectory + goal-independent controlled causal R3M state",
+                            "history_encoder": "2-layer Mamba, hidden=256",
+                            "current_visual_input": "2-view DINOv3 patch tokens + 2-view R3M ResNet-18 semantic tokens",
+                            "r3m_encoder": "frozen_resnet18",
+                            "r3m_current_tokens": 2,
+                            "history_visual_tokens": args.history_r3m_memory_num_queries * 2,
+                            "history_visual_encoder": "goal_free_controlled_history_belief",
                             "action_trajectory_shape": [args.chunk_size, args.action_dim],
-                            "execute_steps": args.chunk_size if args.history_length else None,
+                            "execute_steps": args.chunk_size,
                             "initialization_checkpoint": args.init_checkpoint or None,
                         },
                 }
@@ -1345,18 +684,8 @@ def train_model():
                 torch.save(save_payload, tmp_save_path)
                 os.replace(tmp_save_path, save_path)
                 print(f"saved: {save_path}")
-                if args.keep_latest_ckpt:
-                    prune_old_checkpoints(
-                        args.checkpoint_dir,
-                        args.checkpoint_prefix,
-                        save_path,
-                    )
 
         if pbar is not None:
             pbar.close()
     finally:
         cleanup_distributed()
-
-
-if __name__ == "__main__":
-    train_model()

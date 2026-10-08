@@ -108,91 +108,6 @@ class TextEncoderCacheTest(unittest.TestCase):
         self.assertEqual(encoder.calls, 3)
 
 
-class DINOv3CadenceTest(unittest.TestCase):
-    class _Processor:
-        def __init__(self, size, dtype):
-            self.size = size
-            self.dtype = dtype
-            self.calls = 0
-
-        def __call__(self, images):
-            self.calls += 1
-            return {
-                "pixel_values": torch.zeros(
-                    len(images), 3, self.size, self.size, dtype=self.dtype
-                )
-            }
-
-    class _VisionModel:
-        def __init__(self):
-            self.calls = 0
-
-        def encode_vision(self, pixels):
-            self.calls += 1
-            return pixels + 10 * self.calls
-
-    def make_policy(self):
-        policy = object.__new__(TurboVLAPolicy)
-        policy.dinov3_update_interval = 2
-        policy._dinov3_token_cache = None
-        policy._policy_query_count = 0
-        policy.model = self._VisionModel()
-        return policy
-
-    def test_dinov3_refreshes_every_two_queries(self):
-        policy = self.make_policy()
-
-        self.assertTrue(policy._should_refresh_dinov3())
-        first = policy._attach_dinov3_tokens(
-            {"dinov3": torch.ones(1, 2, 3)}, refresh=True
-        )["dinov3_tokens"]
-        policy._policy_query_count += 1
-
-        self.assertFalse(policy._should_refresh_dinov3())
-        second = policy._attach_dinov3_tokens({}, refresh=False)["dinov3_tokens"]
-        policy._policy_query_count += 1
-
-        self.assertTrue(policy._should_refresh_dinov3())
-        third = policy._attach_dinov3_tokens(
-            {"dinov3": torch.full((1, 2, 3), 2.0)}, refresh=True
-        )["dinov3_tokens"]
-
-        self.assertEqual(policy.model.calls, 2)
-        self.assertIs(first, second)
-        self.assertFalse(torch.equal(second, third))
-
-    def test_episode_reset_invalidates_tokens_and_query_phase(self):
-        policy = self.make_policy()
-        policy._state_history = []
-        policy._image_history = []
-        policy._dinov3_token_cache = torch.ones(1, 2, 3)
-        policy._policy_query_count = 7
-
-        policy.reset_history()
-
-        self.assertIsNone(policy._dinov3_token_cache)
-        self.assertEqual(policy._policy_query_count, 0)
-        self.assertTrue(policy._should_refresh_dinov3())
-
-    def test_r3m_preprocessing_stays_current_when_dinov3_is_reused(self):
-        policy = self.make_policy()
-        policy.device = torch.device("cpu")
-        policy.dinov3_processor = self._Processor(256, torch.float32)
-        policy.r3m_processor = self._Processor(224, torch.uint8)
-        images = [np.zeros((256, 256, 3), dtype=np.uint8)]
-        states = [np.zeros(8, dtype=np.float32)]
-
-        first, _ = policy._build_batch(images, images, states, include_dinov3=True)
-        second, _ = policy._build_batch(images, images, states, include_dinov3=False)
-
-        self.assertIn("dinov3", first)
-        self.assertNotIn("dinov3", second)
-        self.assertIn("r3m", first)
-        self.assertIn("r3m", second)
-        self.assertEqual(policy.dinov3_processor.calls, 1)
-        self.assertEqual(policy.r3m_processor.calls, 2)
-
-
 class _FakeEnv:
     def __init__(self, done_after: int = 3):
         self.done_after = done_after
@@ -203,7 +118,7 @@ class _FakeEnv:
         }
 
     def reset(self):
-        self.steps = 0
+        self.steps = -10
 
     def set_init_state(self, _initial_state):
         return self.observation
@@ -223,8 +138,8 @@ class _FakePolicy:
         self.resets += 1
         self.executed.clear()
 
-    def record_executed(self, obs, action):
-        self.executed.append((obs, np.asarray(action).copy()))
+    def record_history_state(self, obs):
+        self.executed.append(obs)
 
     def predict_env_action_chunk(self, *_args, execute_steps, **_kwargs):
         self.queries += 1
@@ -235,8 +150,6 @@ class RolloutImageProcessingTest(unittest.TestCase):
     def run_episode(self, save_video: bool):
         cfg = GenerateConfig(
             task_suite_name="libero_10",
-            num_steps_wait=0,
-            num_open_loop_steps=2,
             save_video=save_video,
         )
         env = _FakeEnv(done_after=3)
@@ -262,19 +175,19 @@ class RolloutImageProcessingTest(unittest.TestCase):
         (success, replay_images, horizons), policy, rotations = self.run_episode(save_video=False)
 
         self.assertTrue(success)
-        self.assertEqual(policy.queries, 2)
+        self.assertEqual(policy.queries, 1)
         self.assertEqual(policy.resets, 1)
         self.assertEqual(len(policy.executed), 3)
-        self.assertEqual(horizons, [2, 2])
-        self.assertEqual(len(rotations), 4)
+        self.assertEqual(horizons, [10])
+        self.assertEqual(len(rotations), 2)
         self.assertEqual(replay_images, [])
 
     def test_video_mode_keeps_one_frame_per_control_step(self):
         (success, replay_images, horizons), policy, rotations = self.run_episode(save_video=True)
 
         self.assertTrue(success)
-        self.assertEqual(policy.queries, 2)
-        self.assertEqual(horizons, [2, 2])
+        self.assertEqual(policy.queries, 1)
+        self.assertEqual(horizons, [10])
         self.assertEqual(len(rotations), 6)
         self.assertEqual(len(replay_images), 3)
 

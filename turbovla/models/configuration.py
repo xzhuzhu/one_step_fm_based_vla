@@ -85,22 +85,12 @@ class HistoryConfig:
     num_layers: int = 2
     dropout: float = 0.0
     encoder_type: str = "mamba"
-    visual_enabled: ClassVar[bool] = False
-    visual_encoder: ClassVar[str] = "dinov3"
-    visual_encode_chunk_size: ClassVar[int] = 32
-    visual_backprop: ClassVar[bool] = False
     r3m_enabled: bool = False
     r3m_rope_base: float = 10000.0
     r3m_memory_num_queries: int = 2
     r3m_memory_num_heads: int = 4
     r3m_memory_dropout: float = 0.1
     r3m_memory_gate_init: float = 0.1
-    r3m_memory_dynamic_gate: ClassVar[bool] = False
-    r3m_memory_residual_gate: ClassVar[bool] = False
-    r3m_memory_token_dropout: ClassVar[float] = 0.0
-    r3m_memory_rope_values: ClassVar[bool] = False
-    r3m_intentional_memory: ClassVar[bool] = False
-    r3m_intentional_operator_rank: ClassVar[int] = 64
     r3m_belief_num_slots: int = 4
     r3m_belief_future_horizons: ClassVar[tuple[int, ...]] = (1, 4, 8, 12)
 
@@ -173,10 +163,6 @@ class TurboVLAConfig:
             raise ValueError("action dimensions and horizon must be positive")
         if self.history.encoder_type != "mamba":
             raise ValueError("history.encoder_type must be 'mamba'")
-        if self.history.visual_encoder != "dinov3":
-            raise ValueError("history.visual_encoder must be 'dinov3'")
-        if self.history.visual_enabled and not self.history.enabled:
-            raise ValueError("visual history requires state history to be enabled")
         if self.history.r3m_enabled and not self.history.enabled:
             raise ValueError("R3M history requires state history to be enabled")
         if self.history.r3m_enabled and not self.r3m.enabled:
@@ -195,53 +181,8 @@ class TurboVLAConfig:
             raise ValueError("history.r3m_memory_dropout must be in [0, 1)")
         if not 0.0 < self.history.r3m_memory_gate_init < 1.0:
             raise ValueError("history.r3m_memory_gate_init must be in (0, 1)")
-        if not 0.0 <= self.history.r3m_memory_token_dropout < 1.0:
-            raise ValueError("history.r3m_memory_token_dropout must be in [0, 1)")
-        if self.history.r3m_memory_dynamic_gate and not self.history.r3m_enabled:
-            raise ValueError("dynamic R3M memory gating requires R3M history")
-        if self.history.r3m_memory_residual_gate and not self.history.r3m_enabled:
-            raise ValueError("residual R3M memory gating requires R3M history")
-        if (
-            self.history.r3m_memory_dynamic_gate
-            and self.history.r3m_memory_residual_gate
-        ):
-            raise ValueError("dynamic and residual R3M memory gating are mutually exclusive")
-        if self.history.r3m_memory_token_dropout and not self.history.r3m_enabled:
-            raise ValueError("R3M memory token dropout requires R3M history")
-        if self.history.r3m_intentional_memory and not self.history.r3m_enabled:
-            raise ValueError("intentional R3M memory requires R3M history")
-        if self.history.r3m_intentional_operator_rank < 1:
-            raise ValueError("history.r3m_intentional_operator_rank must be positive")
-        if self.history.r3m_intentional_operator_rank > self.interaction.hidden_dim:
-            raise ValueError(
-                "history.r3m_intentional_operator_rank cannot exceed interaction.hidden_dim"
-            )
-        if (
-            self.history.r3m_intentional_memory
-            and not self.history.r3m_memory_rope_values
-        ):
-            raise ValueError("intentional R3M memory requires full key/value RoPE")
-        if (
-            self.history.r3m_intentional_memory
-            and self.history.r3m_predictive_belief
-        ):
-            raise ValueError(
-                "intentional R3M memory and predictive belief are mutually exclusive"
-            )
-        if self.history.r3m_intentional_memory and (
-            self.history.r3m_memory_dynamic_gate
-            or self.history.r3m_memory_residual_gate
-            or self.history.r3m_memory_token_dropout
-            or self.history.r3m_tacit_belief_fusion
-        ):
-            raise ValueError(
-                "intentional R3M memory is a single ungated path and cannot use "
-                "memory gates, token dropout, or tacit-belief fusion"
-            )
         if self.history.r3m_predictive_belief and not self.history.r3m_enabled:
             raise ValueError("predictive R3M belief requires R3M history")
-        if self.history.r3m_predictive_belief and self.history.r3m_memory_rope_values:
-            raise ValueError("predictive R3M belief requires key-only semantic RoPE")
         if (
             self.history.r3m_tacit_belief_fusion
             and not self.history.r3m_predictive_belief
@@ -252,10 +193,6 @@ class TurboVLAConfig:
                 raise ValueError("controlled causal belief requires predictive R3M belief")
             if not self.history.r3m_tacit_belief_fusion:
                 raise ValueError("controlled causal belief requires tacit-belief fusion")
-            if self.history.r3m_intentional_memory:
-                raise ValueError(
-                    "controlled causal belief and intentional R3M memory are mutually exclusive"
-                )
         if not 0.0 < self.history.r3m_tacit_belief_gate_init < 1.0:
             raise ValueError("history.r3m_tacit_belief_gate_init must be in (0, 1)")
         if self.history.r3m_belief_num_slots < 1:
@@ -269,8 +206,6 @@ class TurboVLAConfig:
             )
         if self.history.r3m_rope_base <= 0:
             raise ValueError("history.r3m_rope_base must be positive")
-        if self.history.visual_encode_chunk_size < 1:
-            raise ValueError("history.visual_encode_chunk_size must be positive")
         if self.history.length < 1 or self.history.state_dim < 1:
             raise ValueError("history dimensions and length must be positive")
         if self.history.enabled and (

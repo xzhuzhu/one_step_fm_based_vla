@@ -22,19 +22,11 @@ The official LIBERO evaluation used 500 episodes for each suite at each checkpoi
 | LIBERO-10 | 475 / 500 | 95.0% |
 | **All four** | **1962 / 2000** | **98.10%** |
 
-## LIBERO-PRO smoke evaluation
-
-Using the official [LIBERO-PRO repository](https://github.com/Zxy-MLlab/LIBERO-PRO), the 95k checkpoint completed one episode on task 0 of `libero_object_with_mug` with success (1/1). This is a single-episode runtime check, not a benchmark success-rate estimate. The [result JSON](experiments/libero/results/libero_pro_object_mug_first_result.json) records the task and protocol. The run used a separate Python virtual environment, the official repository’s BDDL and initial-state files, and local OSMesa rendering. PyTorch 2.6 required `weights_only=False` for the official trusted `.pruned_init` files in that local evaluation checkout.
-
-## Full LIBERO-PRO evaluation
-
-The [full evaluation runner](scripts/libero/evaluate_pro_full.py) covers four base suites × five perturbations (`object`, `swap`, `lan`, `task`, `env`), using 50 initial states for each of the 10 tasks per combination: 10,000 episodes total. It saves one JSON per episode shard and a verified 500-episode summary per suite. The runner resumes completed shards. Supply an installed [LIBERO-PRO checkout](https://github.com/Zxy-MLlab/LIBERO-PRO), its [official BDDL and init files](https://huggingface.co/datasets/zhouxueyang/LIBERO-Pro), locally generated environment-perturbation init files, and an OSMesa library. The BDDL instruction is passed to the policy for perturbed suites, including semantic changes. Set `LIBERO_PRO_ROOT` and `FINALVLA_CKPT` if they are outside the default sibling directories.
-
-```bash
-python scripts/libero/evaluate_pro_full.py --gpus 1,2,3,4,5,7 --workers-per-gpu 4
-```
-
-The reported single-episode smoke result above is separate from the 10,000-episode evaluation.
+The single-GPU, 32-shard BF16 re-evaluation completed 2,000 episodes with
+1,957 successes (97.85%): Spatial 97.4%, Object 100.0%, Goal 97.2%, and
+LIBERO-10 96.8%. Its protocol and per-task results are recorded in
+[95k_32slice_bf16.json](experiments/libero/results/95k_32slice_bf16.json).
+This re-evaluation is separate from the original result above.
 
 ## Checkpoint
 
@@ -66,21 +58,27 @@ DATASET_DIRS='/path/to/libero_spatial,/path/to/libero_object,/path/to/libero_goa
   bash scripts/libero/train_100k.sh
 ```
 
-Check `finalvla-train --help` for available runtime arguments. The training launcher fixes the architecture and optimizer recipe used for the published run.
+Check `finalvla-train --help` for available runtime arguments. Both `finalvla-train` and the training launcher use `turbovla.training.train_mixed`. The launcher fixes the architecture and optimizer recipe used for the published run. Set `--head_lr` and `--dinov3_lr` to change the two learning rates.
 
 ## Evaluate
 
-The parallel evaluator supports a single checkpoint and accepts GPU IDs as a comma-separated list. For four suites, run one suite at a time with the same protocol used above:
+The evaluation entry point runs all four suites sequentially on one GPU, with
+32 episode shards per suite. The protocol is fixed: 50 initial states per task,
+BF16, seed 42, 12 predicted actions, and 10 executed actions before replanning.
+DINOv3 and R3M update at every policy query. Mamba runs on CUDA using the
+matched BF16 scan.
 
 ```bash
-python scripts/libero/evaluate_official_parallel.py \
-  --ckpt finalvla_95k.pth --gpus 0 \
-  --task-suite-name libero_10 --num-trials-per-task 50 \
-  --action-head flow_matching --flow-state-dim 8 \
-  --num-open-loop-steps 10
+finalvla-eval --ckpt finalvla_95k.pth --gpu 2 \
+  --output-dir outputs/evaluation/95k_32slice_gpu2
 ```
 
-For the reported 500 episodes per suite, set `--num-trials-per-task 50` (10 tasks per suite) and repeat for `libero_spatial`, `libero_object`, `libero_goal`, and `libero_10`. The evaluator's other flow settings default to this checkpoint's configuration. Ensure the LIBERO simulator and EGL/CUDA environment are configured for the host.
+Each suite has 500 episodes; the full run has 2,000. The evaluator reads the
+model architecture from the checkpoint and uses local pretrained resources.
+Use `finalvla-eval --help` for path options and optional video output.
+Completed shards are resumed after validating their protocol and coverage;
+changing weights, resources, code, package versions, or GPU requires a new output
+directory. EGL rendering uses the packaged NVIDIA vendor configuration.
 
 ## License
 

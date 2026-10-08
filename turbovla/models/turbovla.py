@@ -5,7 +5,6 @@ from typing import Any, Mapping, Sequence
 
 import torch
 from torch import nn
-from torch.nn import functional as F
 
 from .action_head import StateProjection, TurboVLAActionHead
 from .components.myvla_action_head import MyVLAFlowMatchingActionHead
@@ -199,11 +198,6 @@ class TurboVLA(nn.Module):
         self.r3m_projection = None
         self.r3m_history_cross_attention = None
         self.r3m_history_relation = None
-        self.r3m_history_memory_dynamic_gate = None
-        self.r3m_history_memory_residual_scale = None
-        self.r3m_history_intentional_goal_factors = None
-        self.r3m_history_intentional_current_factors = None
-        self.r3m_history_intentional_relation_out = None
         self.r3m_history_dynamics_encoder = None
         self.r3m_history_dynamics_attention = None
         self.r3m_history_state_delta_projection = None
@@ -266,59 +260,10 @@ class TurboVLA(nn.Module):
                     float(config.history.r3m_memory_gate_init), dtype=torch.float32
                 )
                 gate_logit = torch.logit(gate_init)
-                if config.history.r3m_intentional_memory:
-                    # Intentional memory is a single normalized path: the goal
-                    # organizes retrieval itself instead of gating memory after
-                    # it has been formed.
-                    pass
-                elif (
-                    config.history.r3m_memory_dynamic_gate
-                    or config.history.r3m_memory_residual_gate
-                ):
-                    self.r3m_history_memory_dynamic_gate = nn.Sequential(
-                        nn.LayerNorm(hidden_dim * 3),
-                        nn.Linear(hidden_dim * 3, hidden_dim),
-                        nn.SiLU(),
-                        nn.Dropout(config.history.r3m_memory_dropout),
-                        nn.Linear(hidden_dim, 1),
-                    )
-                    final_gate = self.r3m_history_memory_dynamic_gate[-1]
-                    if config.history.r3m_memory_residual_gate:
-                        # Preserve the scalar-gate function exactly at step 0.
-                        # The residual network starts receiving gradients after
-                        # its zero-initialized scalar scale begins to move.
-                        self.r3m_history_memory_gate_logit = nn.Parameter(gate_logit)
-                        self.r3m_history_memory_residual_scale = nn.Parameter(
-                            torch.zeros((), dtype=torch.float32)
-                        )
-                        nn.init.zeros_(final_gate.bias)
-                    else:
-                        # Legacy dynamic gate: start from the previous scalar
-                        # behavior, then predict each view/query gate directly.
-                        nn.init.zeros_(final_gate.weight)
-                        nn.init.constant_(final_gate.bias, float(gate_logit))
-                else:
-                    self.r3m_history_memory_gate_logit = nn.Parameter(gate_logit)
+                self.r3m_history_memory_gate_logit = nn.Parameter(gate_logit)
                 nn.init.trunc_normal_(self.r3m_history_memory_queries, std=0.02)
                 nn.init.trunc_normal_(self.r3m_history_memory_type_embedding, std=0.02)
-                if config.history.r3m_intentional_memory:
-                    operator_rank = config.history.r3m_intentional_operator_rank
-                    self.r3m_history_intentional_goal_factors = nn.Sequential(
-                        nn.LayerNorm(hidden_dim),
-                        nn.Linear(hidden_dim, operator_rank),
-                        nn.Tanh(),
-                    )
-                    self.r3m_history_intentional_current_factors = nn.Linear(
-                        hidden_dim,
-                        operator_rank,
-                        bias=False,
-                    )
-                    self.r3m_history_intentional_relation_out = nn.Linear(
-                        operator_rank,
-                        hidden_dim,
-                        bias=False,
-                    )
-                elif config.history.r3m_predictive_belief:
+                if config.history.r3m_predictive_belief:
                     # Shared MambaBlock dispatches CUDA BF16 dynamics to matched scan.
                     self.r3m_history_dynamics_encoder = nn.ModuleList(
                         [MambaBlock(hidden_dim) for _ in range(config.history.num_layers)]
@@ -445,18 +390,8 @@ class TurboVLA(nn.Module):
                         )
         else:
             self.register_parameter("r3m_view_embedding", None)
-        if config.history.visual_enabled:
-            self.history_visual_view_embedding = nn.Parameter(
-                torch.zeros(1, config.vision.num_views, hidden_dim)
-            )
-            self.history_visual_time_embedding = nn.Parameter(
-                torch.zeros(1, config.history.length, 1, hidden_dim)
-            )
-            nn.init.trunc_normal_(self.history_visual_view_embedding, std=0.02)
-            nn.init.trunc_normal_(self.history_visual_time_embedding, std=0.02)
-        else:
-            self.register_parameter("history_visual_view_embedding", None)
-            self.register_parameter("history_visual_time_embedding", None)
+        self.register_parameter("history_visual_view_embedding", None)
+        self.register_parameter("history_visual_time_embedding", None)
 
         if config.vision.position_embedding == "learned_patch":
             self.view_embedding = nn.Parameter(torch.zeros(1, self.num_views, 1, hidden_dim))
@@ -673,13 +608,9 @@ class TurboVLA(nn.Module):
             dtype=history_tokens.dtype,
         )
         current_base = current_r3m_tokens.to(dtype=history_tokens.dtype) - view
-        intentional_memory = bool(
-            getattr(self.config.history, "r3m_intentional_memory", False)
-        )
 
         # Preserve absolute historical features as values and encode relative
         # positions (-12..-1) only in the attention keys for the v10 recipe.
-        # The legacy switch can still rotate values when loading older recipes.
         # Views are folded into the batch and current-frame queries are at p=0.
         history_values_by_view = history_tokens.permute(0, 2, 1, 3)
         history_values_by_view = history_values_by_view.reshape(
@@ -697,36 +628,12 @@ class TurboVLA(nn.Module):
             relative_positions,
             base=self.config.history.r3m_rope_base,
         )
-        if self.config.history.r3m_memory_rope_values:
-            history_values_by_view = history_keys_by_view
 
         learned_queries = self.r3m_history_memory_queries.to(
             device=history_tokens.device,
             dtype=history_tokens.dtype,
         )
         query_current = current_base
-        if intentional_memory:
-            required_modules = (
-                self.r3m_history_intentional_goal_factors,
-                self.r3m_history_intentional_current_factors,
-                self.r3m_history_intentional_relation_out,
-            )
-            if any(module is None for module in required_modules):
-                raise RuntimeError("intentional R3M query operator is not constructed")
-            expected_goal = (batch_size, hidden_dim)
-            if goal_summary is None or tuple(goal_summary.shape) != expected_goal:
-                actual = None if goal_summary is None else tuple(goal_summary.shape)
-                raise ValueError(
-                    f"intentional R3M memory requires goal_summary {expected_goal}, got {actual}"
-                )
-            goal_factors = self.r3m_history_intentional_goal_factors(
-                goal_summary.to(device=history_tokens.device, dtype=history_tokens.dtype)
-            )
-            current_factors = self.r3m_history_intentional_current_factors(current_base)
-            from_to_relation = self.r3m_history_intentional_relation_out(
-                current_factors * goal_factors[:, None, :]
-            )
-            query_current = current_base + from_to_relation
         queries = query_current[:, :, None, :] + learned_queries[None, None]
         queries = queries.reshape(batch_size * num_views, num_queries, hidden_dim)
 
@@ -758,67 +665,15 @@ class TurboVLA(nn.Module):
             device=memory.device,
             dtype=memory.dtype,
         )
-        if intentional_memory:
-            # The focal goal has already organized retrieval.  Keeping this
-            # path ungated avoids constructing a second, post-hoc authority
-            # over the same tacit memory.
-            pass
-        elif (
-            self.config.history.r3m_memory_dynamic_gate
-            or self.config.history.r3m_memory_residual_gate
-        ):
-            expected_state_tokens = (batch_size, history_length, hidden_dim)
-            if history_state_tokens is None or tuple(history_state_tokens.shape) != expected_state_tokens:
-                actual = None if history_state_tokens is None else tuple(history_state_tokens.shape)
-                raise ValueError(
-                    f"dynamic R3M gate requires history_state_tokens {expected_state_tokens}, got {actual}"
-                )
-            state_tokens = history_state_tokens.to(device=memory.device, dtype=memory.dtype)
-            state_valid = history_mask.unsqueeze(-1).to(dtype=memory.dtype)
-            state_summary = (state_tokens * state_valid).sum(dim=1)
-            state_summary = state_summary / state_valid.sum(dim=1).clamp_min(1.0)
-            state_for_memory = state_summary[:, None, None, :].expand_as(memory_content)
-            gate_features = torch.cat(
-                [current_for_memory, memory_content, state_for_memory],
-                dim=-1,
-            )
-            if self.r3m_history_memory_dynamic_gate is None:
-                raise RuntimeError("dynamic R3M history gate is not constructed")
-            predicted_gate = self.r3m_history_memory_dynamic_gate(gate_features)
-            if self.config.history.r3m_memory_residual_gate:
-                if self.r3m_history_memory_residual_scale is None:
-                    raise RuntimeError("residual R3M history gate scale is not constructed")
-                base_gate_logit = self.r3m_history_memory_gate_logit.to(
-                    device=memory.device,
-                    dtype=memory.dtype,
-                )
-                residual_scale = torch.tanh(
-                    self.r3m_history_memory_residual_scale.to(
-                        device=memory.device,
-                        dtype=memory.dtype,
-                    )
-                )
-                gate = torch.sigmoid(base_gate_logit + residual_scale * predicted_gate)
-            else:
-                gate = torch.sigmoid(predicted_gate)
-        else:
-            gate = torch.sigmoid(self.r3m_history_memory_gate_logit).to(
-                device=memory.device,
-                dtype=memory.dtype,
-            )
-        if not intentional_memory:
-            memory = gate * memory
+        gate = torch.sigmoid(self.r3m_history_memory_gate_logit).to(
+            device=memory.device,
+            dtype=memory.dtype,
+        )
+        memory = gate * memory
 
         memory_mask = history_mask.any(dim=1)[:, None, None].expand(
             -1, num_views, num_queries
         )
-        token_dropout = float(self.config.history.r3m_memory_token_dropout)
-        if self.training and token_dropout > 0.0:
-            keep_tokens = torch.rand(
-                memory_mask.shape,
-                device=memory_mask.device,
-            ) >= token_dropout
-            memory_mask = memory_mask & keep_tokens
         history_visual_tokens = memory.flatten(1, 2)
         history_visual_mask = memory_mask.flatten(1, 2)
         history_visual_tokens = history_visual_tokens.masked_fill(
@@ -827,25 +682,6 @@ class TurboVLA(nn.Module):
         )
         return history_visual_tokens, history_visual_mask
 
-    def encode_r3m_intentional_memory(
-        self,
-        samples: Mapping[str, torch.Tensor],
-        current_r3m_tokens: torch.Tensor,
-        history_mask: torch.Tensor,
-        history_state_tokens: torch.Tensor,
-        goal_summary: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
-        """Form one goal-operated tacit memory."""
-        if not bool(getattr(self.config.history, "r3m_intentional_memory", False)):
-            raise RuntimeError("intentional R3M memory is not enabled")
-        tokens, token_mask = self.encode_r3m_history(
-            samples,
-            current_r3m_tokens,
-            history_mask,
-            history_state_tokens,
-            goal_summary,
-        )
-        return tokens, token_mask, {}
 
     def _encode_r3m_tacit_belief_fusion(
         self,
@@ -1279,75 +1115,6 @@ class TurboVLA(nn.Module):
             raise ValueError(f"samples mapping must contain {key!r}")
         return samples[key]
 
-    def encode_dinov3_history(
-        self,
-        samples: torch.Tensor | Mapping[str, torch.Tensor],
-        history_mask: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        if not self.config.history.visual_enabled:
-            raise RuntimeError("DINOv3 visual history is not enabled")
-        pixel_values = self._mapping_tensor(samples, "dinov3_history")
-        expected = (
-            self.config.history.length,
-            self.num_views,
-            3,
-            self.config.vision.image_size,
-            self.config.vision.image_size,
-        )
-        if pixel_values.ndim != 6 or tuple(pixel_values.shape[1:]) != expected:
-            raise ValueError(
-                f"dinov3_history must be [B,{','.join(str(v) for v in expected)}], "
-                f"got {tuple(pixel_values.shape)}"
-            )
-        history_mask = history_mask.to(device=pixel_values.device, dtype=torch.bool)
-        if history_mask.shape != pixel_values.shape[:2]:
-            raise ValueError(
-                f"history_mask must be {tuple(pixel_values.shape[:2])}, "
-                f"got {tuple(history_mask.shape)}"
-            )
-
-        batch_size, history_length = pixel_values.shape[:2]
-        flat_frames = pixel_values.flatten(0, 1)
-        valid_indices = history_mask.flatten().nonzero(as_tuple=False).flatten()
-        if valid_indices.numel():
-            valid_frames = flat_frames.index_select(0, valid_indices)
-            encoded_chunks = []
-            chunk_size = self.config.history.visual_encode_chunk_size
-            grad_context = nullcontext() if self.config.history.visual_backprop else torch.no_grad()
-            with grad_context:
-                for start in range(0, valid_frames.shape[0], chunk_size):
-                    patch_tokens = self.vision_encoder(valid_frames[start : start + chunk_size])
-                    encoded_chunks.append(patch_tokens.mean(dim=2))
-            valid_embeddings = torch.cat(encoded_chunks, dim=0)
-            valid_embeddings = valid_embeddings.to(dtype=self.vision_projection.skip.weight.dtype)
-            all_embeddings = valid_embeddings.new_zeros(
-                batch_size * history_length,
-                self.num_views,
-                self.vision_encoder.hidden_size,
-            )
-            all_embeddings = all_embeddings.index_copy(0, valid_indices, valid_embeddings)
-        else:
-            all_embeddings = self.vision_projection.skip.weight.new_zeros(
-                batch_size * history_length,
-                self.num_views,
-                self.vision_encoder.hidden_size,
-            )
-        all_embeddings = all_embeddings.view(
-            batch_size,
-            history_length,
-            self.num_views,
-            self.vision_encoder.hidden_size,
-        )
-        tokens = self.vision_projection(all_embeddings)
-        view = self.history_visual_view_embedding[:, None].to(
-            device=tokens.device,
-            dtype=tokens.dtype,
-        )
-        time = self.history_visual_time_embedding.to(device=tokens.device, dtype=tokens.dtype)
-        tokens = tokens + view + time
-        token_mask = history_mask[:, :, None].expand(-1, -1, self.num_views)
-        tokens = tokens.masked_fill(~token_mask.unsqueeze(-1), 0.0)
-        return tokens.flatten(1, 2), token_mask.flatten(1, 2)
 
     def _encode_condition_with_mask(
         self,
@@ -1428,7 +1195,6 @@ class TurboVLA(nn.Module):
         action_masks: torch.Tensor | None = None,
         history_states: torch.Tensor | None = None,
         history_mask: torch.Tensor | None = None,
-        ablate_history_r3m_tokens: bool = False,
     ) -> torch.Tensor | dict[str, torch.Tensor]:
         encoded_condition = self._encode_condition_with_mask(instructions, samples)
         if len(encoded_condition) == 3:
@@ -1478,31 +1244,16 @@ class TurboVLA(nn.Module):
                 )
                 extra_tokens = []
                 extra_padding = []
-                if self.config.history.r3m_enabled and not ablate_history_r3m_tokens:
+                if self.config.history.r3m_enabled:
                     predictive_belief = bool(
                         getattr(self.config.history, "r3m_predictive_belief", False)
                     )
-                    intentional_memory = bool(
-                        getattr(self.config.history, "r3m_intentional_memory", False)
-                    )
                     if current_r3m_tokens is None:
                         raise RuntimeError("R3M history requires current R3M outputs")
-                    if predictive_belief or intentional_memory:
+                    if predictive_belief:
                         if not isinstance(samples, Mapping):
                             raise TypeError("predictive R3M history requires mapped samples")
-                    if intentional_memory:
-                        (
-                            history_r3m_tokens,
-                            history_r3m_mask,
-                            auxiliary_losses,
-                        ) = self.encode_r3m_intentional_memory(
-                            samples,
-                            current_r3m_tokens,
-                            history_mask,
-                            history_tokens,
-                            goal_summary,
-                        )
-                    elif predictive_belief:
+                    if predictive_belief:
                         (
                             history_r3m_tokens,
                             history_r3m_mask,
@@ -1523,13 +1274,6 @@ class TurboVLA(nn.Module):
                         )
                     extra_tokens.append(history_r3m_tokens.to(dtype=condition.dtype))
                     extra_padding.append(~history_r3m_mask)
-                if self.config.history.visual_enabled:
-                    history_visual_tokens, history_visual_mask = self.encode_dinov3_history(
-                        samples,
-                        history_mask,
-                    )
-                    extra_tokens.append(history_visual_tokens.to(dtype=condition.dtype))
-                    extra_padding.append(~history_visual_mask)
                 if (
                     not bool(getattr(self.config.history, "r3m_predictive_belief", False))
                     or bool(getattr(self.config.history, "r3m_tacit_belief_fusion", False))
@@ -1563,45 +1307,10 @@ class TurboVLA(nn.Module):
         action_dtype = self.action_head.decoder.action_queries.weight.dtype
         return self.action_head(condition.to(dtype=action_dtype), state.to(dtype=action_dtype))
 
-    # Transitional read-only names used only by legacy checkpoint initialization.
-    @property
-    def dinov3(self):
-        return self.vision_encoder.backbone
-
-    @property
-    def text_proj(self):
-        return self.text_encoder.text_projection
-
-    @property
-    def vision_proj(self):
-        return self.vision_projection
-
-    @property
-    def feature_enhancer(self):
-        return self.vision_language_interaction
-
-    @property
-    def state_proj(self):
-        if self.action_head_type == "flow_matching":
-            return getattr(self, "state_proj_module", None)
-        return self.action_head.state_projection
-
-    @property
-    def action_policy(self):
-        if self.action_head_type == "flow_matching":
-            return self.flow_action_policy
-        return self.action_head.decoder
 
 
 def _arg(args: Any, name: str, default: Any) -> Any:
     return getattr(args, name, default)
-
-
-def _integer_tuple_arg(args: Any, name: str, default: tuple[int, ...]) -> tuple[int, ...]:
-    value = _arg(args, name, default)
-    if isinstance(value, str):
-        return tuple(int(item.strip()) for item in value.split(",") if item.strip())
-    return tuple(int(item) for item in value)
 
 
 def build_turbovla(args: TurboVLAConfig | Mapping[str, Any] | Any) -> TurboVLA:

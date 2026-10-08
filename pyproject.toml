@@ -38,8 +38,8 @@ dev = [
 ]
 
 [project.scripts]
-finalvla-train = "turbovla.training.train_history12_dinov3_r3m_controlled_causal_state_v15:main"
-finalvla-eval = "vla_adapter.rollout:main"
+finalvla-train = "turbovla.training.train_mixed:main"
+finalvla-eval = "turbovla.evaluation.runner:main"
 
 [tool.setuptools.packages.find]
 where = [".", "third_party/vla_adapter"]
@@ -48,6 +48,7 @@ include = ["experiments*", "turbovla*", "vla_adapter*"]
 [tool.setuptools.package-data]
 "experiments.libero" = ["configs/*.json"]
 "turbovla._vendor.myvla" = ["README.md"]
+"turbovla.evaluation" = ["nvidia_egl_vendor.json"]
 
 [tool.ruff]
 line-length = 120
